@@ -11,6 +11,7 @@ from .damage_calculator import DamageCalculator
 from .turn_system import TurnSystem
 from .buff_tracker import BuffTracker
 from .racial_passives import RacialPassives
+from .special_encounters import SpecialEncounterHandler
 
 
 class BattleLog:
@@ -48,7 +49,8 @@ class BattleSimulator:
         initial_state: BattleState,
         player_script: Union[List[TurnAction], Callable[['BattleState'], TurnAction]],
         enemy_script: Union[List[TurnAction], Callable[['BattleState'], TurnAction]],
-        max_turns: int = 50
+        max_turns: int = 50,
+        special_encounter_id: Optional[str] = None
     ) -> Dict:
         """
         Run a complete battle simulation
@@ -58,6 +60,7 @@ class BattleSimulator:
             player_script: List of actions OR function(state) -> TurnAction
             enemy_script: List of actions OR function(state) -> TurnAction
             max_turns: Maximum turns before draw
+            special_encounter_id: ID of special encounter mechanic (e.g. 'rocko_immunity')
         
         Returns:
             {
@@ -80,7 +83,7 @@ class BattleSimulator:
             enemy_action = self._get_action(enemy_script, state, turn, 'enemy')
             
             # Execute the turn
-            state = self.execute_turn(state, player_action, enemy_action, turn)
+            state = self.execute_turn(state, player_action, enemy_action, turn, special_encounter_id)
             
             # Check for battle end
             if state.is_battle_over():
@@ -125,13 +128,13 @@ class BattleSimulator:
         state: BattleState,
         player_action: TurnAction,
         enemy_action: TurnAction,
-        turn_number: int
+        turn_number: int,
+        special_encounter_id: Optional[str] = None
     ) -> BattleState:
         """
         Execute a single turn of battle
         """
         # Make a copy to avoid mutating input
-        new_state = state.copy()
         new_state = state.copy()
         
         # Get active pets
@@ -140,6 +143,21 @@ class BattleSimulator:
         
         if not player_pet or not enemy_pet:
             return new_state
+            
+        # Special Encounter: Start of Turn Checks
+        if special_encounter_id:
+            # Rocko Immunity (Auto-death check)
+            if special_encounter_id == 'rocko_immunity':
+                # Check both pets (in case player has Rocko? Unlikely but safe)
+                for pet in [player_pet, enemy_pet]:
+                    if SpecialEncounterHandler.has_special_mechanic(pet) == 'rocko_immunity':
+                        SpecialEncounterHandler.apply_rocko_immunity(pet, turn_number)
+            
+            # Gorespine Gore (Stack application)
+            elif special_encounter_id == 'gore_stacks':
+                for pet in [player_pet, enemy_pet]:
+                    if SpecialEncounterHandler.has_special_mechanic(pet) == 'gore_stacks':
+                        SpecialEncounterHandler.apply_gorespine_gore(pet, turn_number)
         
         # Determine action order
         action_order = self.turn_system.determine_turn_order(
@@ -166,7 +184,7 @@ class BattleSimulator:
                 continue
 
             # Execute the action
-            self.execute_action(action, attacker, defender, attacker_team, new_state)
+            self.execute_action(action, attacker, defender, attacker_team, new_state, special_encounter_id)
             
             # Check if battle ended
             if new_state.is_battle_over():
@@ -192,7 +210,8 @@ class BattleSimulator:
         attacker: Pet,
         defender: Pet,
         attacker_team: Team,
-        state: BattleState
+        state: BattleState,
+        special_encounter_id: Optional[str] = None
     ):
         """Execute a single action (ability, swap, etc.)"""
         if action.action_type == 'swap':
@@ -211,6 +230,29 @@ class BattleSimulator:
             
             # Set cooldown
             attacker.use_ability(ability)
+            
+            # Special Encounter Ability Handling
+            special_handled = False
+            if special_encounter_id:
+                if ability.name == "Life Exchange":
+                    SpecialEncounterHandler.apply_life_exchange(attacker, defender)
+                    self.log.add_event({'type': 'special_ability', 'ability': 'Life Exchange', 'actor': attacker.name})
+                    special_handled = True
+                elif ability.name == "Mind Games":
+                    SpecialEncounterHandler.apply_mind_games(state.player_team if attacker == state.enemy_team.get_active_pet() else state.enemy_team, attacker)
+                    self.log.add_event({'type': 'special_ability', 'ability': 'Mind Games', 'actor': attacker.name})
+                    special_handled = True
+                elif ability.name == "Bone Prison":
+                    SpecialEncounterHandler.apply_bone_prison(defender)
+                    self.log.add_event({'type': 'special_ability', 'ability': 'Bone Prison', 'actor': attacker.name})
+                    special_handled = True
+                elif ability.name == "Shell Shield":
+                    SpecialEncounterHandler.apply_shell_shield(attacker)
+                    self.log.add_event({'type': 'special_ability', 'ability': 'Shell Shield', 'actor': attacker.name})
+                    special_handled = True
+            
+            if special_handled:
+                return  # Skip normal processing for special abilities
             
             if ability.is_heal:
                 # Healing ability
@@ -247,6 +289,16 @@ class BattleSimulator:
                 immunity_active = any(
                     buff.type == BuffType.IMMUNITY for buff in defender.active_buffs
                 )
+                
+                # Special Encounter: Rocko Immunity Check
+                if special_encounter_id == 'rocko_immunity':
+                    if SpecialEncounterHandler.has_special_mechanic(defender) == 'rocko_immunity':
+                        # Check if currently immune (turns 1-10)
+                        # We need the turn number here. 
+                        # execute_action doesn't have turn number passed directly, but state has turn_number
+                        if SpecialEncounterHandler.apply_rocko_immunity(defender, state.turn_number):
+                            immunity_active = True
+                
                 if immunity_active:
                     damage = 0
                     details['final_damage'] = 0
@@ -266,6 +318,18 @@ class BattleSimulator:
                     
                     # Apply remaining damage
                     actual_damage = defender.stats.take_damage(remaining_damage)
+                    
+                    # Special Encounter: Toxic Skin Reflection
+                    if special_encounter_id == 'toxic_skin':
+                         if SpecialEncounterHandler.has_special_mechanic(defender) == 'toxic_skin':
+                             reflected = SpecialEncounterHandler.apply_toxic_skin(attacker, actual_damage)
+                             if reflected > 0:
+                                 self.log.add_event({
+                                     'type': 'damage_reflection',
+                                     'source': defender.name,
+                                     'target': attacker.name,
+                                     'amount': reflected
+                                 })
                     
                     # Apply Humanoid passive (heal 4% max HP after dealing damage)
                     if attacker.family == PetFamily.HUMANOID and actual_damage > 0:

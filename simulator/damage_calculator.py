@@ -86,7 +86,7 @@ class DamageCalculator:
         """Get damage multiplier based on pet quality"""
         return QUALITY_MODIFIERS.get(quality, 1.0)
     
-    def check_hit(self, ability: Ability, attacker: Pet, defender: Pet) -> bool:
+    def check_hit(self, ability: Ability, attacker: Pet, defender: Pet, weather: Optional[Buff] = None) -> bool:
         """Determine if ability hits (based on accuracy)"""
         # Natural 100% accuracy
         if ability.accuracy >= 100:
@@ -98,9 +98,32 @@ class DamageCalculator:
             if buff.type == BuffType.STAT_MOD and buff.stat_affected == 'dodge':
                 dodge_chance += buff.magnitude
         
+        # Check weather accuracy modifiers
+        weather_mod = 0.0
+        if weather and weather.type == BuffType.WEATHER:
+            weather_name = getattr(weather, 'stat_affected', None)
+            
+            # Weather accuracy effects
+            weather_accuracy = {
+                'call_darkness': -0.10,  # -10% accuracy
+                'darkness': -0.10,       # Standard Darkness
+            }
+            
+            if weather_name in weather_accuracy:
+                # Elemental pets ignore weather effects
+                if attacker.family != PetFamily.ELEMENTAL:
+                    weather_mod = weather_accuracy[weather_name]
+        
         # Roll for hit
         hit_roll = self.rng.randint(1, 100)
-        return hit_roll <= (ability.accuracy - dodge_chance * 100)
+        
+        # Calculate threshold: Accuracy - Dodge - WeatherPenalty
+        # Note: weather_mod is negative for penalty, so we add it? 
+        # Formula: Chance = Accuracy + WeatherMod - Dodge
+        # Example: 90% acc + (-10%) weather - 0% dodge = 80% chance
+        threshold = ability.accuracy + (weather_mod * 100) - (dodge_chance * 100)
+        
+        return hit_roll <= threshold
     
     def check_crit(self, attacker: Pet) -> bool:
         """Determine if attack crits (5% base + crit buffs)"""
@@ -171,7 +194,7 @@ class DamageCalculator:
         }
         
         # Check if ability hits
-        if not self.check_hit(ability, attacker, defender):
+        if not self.check_hit(ability, attacker, defender, weather):
             details['hit'] = False
             return 0, details
         

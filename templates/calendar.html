@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pet Weaver Calendar</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>Calendar</h1>
+            </div>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/dashboard">Dashboard</a>
+                <a href="/strategies">Strategies</a>
+                <a href="/hunting">Hunting</a>
+                <a href="/leveling">Leveling</a>
+                <a href="/calendar" class="active">Calendar</a>
+            </nav>
+        </header>
+
+        <main>
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                    <h2 id="month-label" style="margin: 0;">Loading...</h2>
+                    <div class="calendar-controls" style="display: flex; gap: 0.5rem;">
+                        <button id="prev-month" class="btn-primary">← Prev</button>
+                        <button id="today-btn" class="btn-primary">Today</button>
+                        <button id="next-month" class="btn-primary">Next →</button>
+                    </div>
+                </div>
+
+                <table class="calendar-table" id="calendar-table">
+                    <thead>
+                        <tr>
+                            <th>Sun</th>
+                            <th>Mon</th>
+                            <th>Tue</th>
+                            <th>Wed</th>
+                            <th>Thu</th>
+                            <th>Fri</th>
+                            <th>Sat</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td colspan="7" class="loading">Loading calendar data...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+
+        <div class="status-indicator" id="status-badge" style="position: fixed; bottom: 1rem; right: 1rem;">IDLE</div>
+    </div>
+
+    <script>
+        // Calendar navigation state
+        let monthOffset = 0; // 0 = current month
+        const monthLabel = document.getElementById('month-label');
+        const prevBtn = document.getElementById('prev-month');
+        const todayBtn = document.getElementById('today-btn');
+        const nextBtn = document.getElementById('next-month');
+
+        function formatMonth(date) {
+            const options = { year: 'numeric', month: 'long' };
+            return date.toLocaleDateString(undefined, options);
+        }
+
+        function getMonthParam(offset) {
+            const now = new Date();
+            const target = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+            const year = target.getFullYear();
+            const month = String(target.getMonth() + 1).padStart(2, '0');
+            return `${year}-${month}`;
+        }
+
+        function loadCalendar() {
+            const monthParam = getMonthParam(monthOffset);
+            monthLabel.textContent = formatMonth(new Date(monthParam + '-01'));
+
+            // Add loading state
+            const tbody = document.querySelector('#calendar-table tbody');
+            tbody.style.opacity = '0.5';
+
+            fetch(`/api/calendar?month=${monthParam}`)
+                .then(r => r.json())
+                .then(data => {
+                    tbody.innerHTML = '';
+                    tbody.style.opacity = '1';
+
+                    const today = new Date().toISOString().split('T')[0];
+                    let week = [];
+
+                    // Pad start of month
+                    if (data.length > 0) {
+                        const firstDate = new Date(data[0].date);
+                        const startDay = firstDate.getUTCDay(); // 0=Sun
+                        for (let i = 0; i < startDay; i++) {
+                            week.push(null);
+                        }
+                    }
+
+                    data.forEach(item => {
+                        week.push(item);
+                        if (week.length === 7) {
+                            renderWeek(week);
+                            week = [];
+                        }
+                    });
+
+                    // Pad end of month
+                    if (week.length > 0) {
+                        while (week.length < 7) week.push(null);
+                        renderWeek(week);
+                    }
+                })
+                .catch(err => {
+                    console.error('Failed to load calendar data.', err);
+                    tbody.innerHTML = `<tr><td colspan="7" class="error">Error loading calendar.</td></tr>`;
+                    tbody.style.opacity = '1';
+                });
+        }
+
+        function renderWeek(days) {
+            const tbody = document.querySelector('#calendar-table tbody');
+            const tr = document.createElement('tr');
+            const today = new Date().toISOString().split('T')[0];
+
+            days.forEach(cell => {
+                const td = document.createElement('td');
+                if (cell) {
+                    const classes = [];
+                    if (cell.is_squirt) classes.push('squirt');
+                    if (cell.is_pet_battle_week) classes.push('pet-week');
+                    if (cell.date === today) classes.push('today');
+                    td.className = classes.join(' ');
+
+                    // Format date number
+                    const dateNum = cell.date.split('-')[2];
+
+                    td.innerHTML = `
+                        <div style="font-weight:bold; margin-bottom:0.5rem;">${dateNum}</div>
+                        ${cell.is_squirt ? `<img class="icon-img" src="{{ url_for('static', filename='images/squirt_trainer.png') }}" alt="Squirt" title="Squirt Day!"/>` : ''}
+                        ${cell.is_pet_battle_week ? `<img class="icon-img" src="{{ url_for('static', filename='images/pet_week_icon.png') }}" alt="Pet Battle Week" title="Pet Battle Week"/>` : ''}
+                    `;
+                } else {
+                    td.style.background = 'transparent';
+                    td.style.border = 'none';
+                }
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        }
+
+        // Button event listeners
+        prevBtn.addEventListener('click', () => { monthOffset--; loadCalendar(); });
+        todayBtn.addEventListener('click', () => { monthOffset = 0; loadCalendar(); });
+        nextBtn.addEventListener('click', () => { monthOffset++; loadCalendar(); });
+
+        // Initial load
+        loadCalendar();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browse Strategies - PetWeaver</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>Strategy Browser</h1>
+            </div>
+            <nav>
+                <a href="/" class="active">Home</a>
+                <a href="/dashboard">Dashboard</a>
+                <a href="/strategies">Strategies</a>
+                <a href="/wizard">Wizard</a>
+                <a href="/hunting">Hunting</a>
+                <a href="/leveling">Leveling</a>
+            </nav>
+        </header>
+
+        <main>
+            <!-- Search & Filter -->
+            <div class="card">
+                <div class="search-bar">
+                    <input type="text" id="search" placeholder="🔍 Search encounters..." onkeyup="filterStrategies()">
+                    <select id="expansion-filter" onchange="filterStrategies()">
+                        <option value="">All Expansions</option>
+                        <option value="The War Within">The War Within</option>
+                        <option value="Dragonflight">Dragonflight</option>
+                        <option value="Shadowlands">Shadowlands</option>
+                        <option value="Battle for Azeroth">Battle for Azeroth</option>
+                        <option value="Legion">Legion</option>
+                    </select>
+                    <select id="category-filter" onchange="filterStrategies()">
+                        <option value="">All Categories</option>
+                        <option value="World Quests">World Quests</option>
+                        <option value="Dungeons">Dungeons</option>
+                        <option value="Raids">Raids</option>
+                        <option value="Pet Battles">Pet Battles</option>
+                        <option value="Tamers">Tamers</option>
+                    </select>
+                </div>
+                <div style="margin-top: 1rem; text-align: right;">
+                    <a href="/wizard" class="btn-primary" style="text-decoration: none;">✨ Create New Strategy</a>
+                </div>
+            </div>
+
+            <!-- Strategy List -->
+            <div id="strategy-list">
+                <div class="loading">Loading strategies...</div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let allStrategies = [];
+
+        function loadStrategies() {
+            fetch('/api/strategies/all')
+                .then(res => res.json())
+                .then(data => {
+                    allStrategies = data;
+                    displayStrategies(data);
+                });
+        }
+
+        function displayStrategies(strategies) {
+            const container = document.getElementById('strategy-list');
+
+            if (strategies.length === 0) {
+                container.innerHTML = '<div class="empty">No strategies found</div>';
+                return;
+            }
+
+            container.innerHTML = strategies.map(strat => `
+                <div class="card strategy-card">
+                    <div class="strategy-header">
+                        <h3>${strat.name}</h3>
+                        <span class="badge">${strat.expansion}</span>
+                    </div>
+                    <div class="strategy-meta">
+                        <span class="category">${strat.category}</span>
+                        <span class="team-count">${strat.teams.length} team(s)</span>
+                    </div>
+                    <div class="strategy-teams">
+                        ${strat.teams.slice(0, 1).map(team => `
+                            <div class="team-preview">
+                                <strong>Recommended Team:</strong>
+                                <div class="pets">
+                                    ${team.pet_slots ? team.pet_slots.map(slot =>
+                slot[0] ? `<span class="pet-badge">${slot[0].name}</span>` : ''
+            ).join('') : 'Details in addon'}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function filterStrategies() {
+            const search = document.getElementById('search').value.toLowerCase();
+            const expansion = document.getElementById('expansion-filter').value;
+            const categoryFilter = document.getElementById('category-filter')?.value || '';
+
+            const filtered = allStrategies.filter(strat => {
+                const matchesSearch = strat.name.toLowerCase().includes(search);
+                const matchesExpansion = !expansion || strat.expansion === expansion;
+                const matchesCategory = !categoryFilter || strat.category === categoryFilter;
+                return matchesSearch && matchesExpansion && matchesCategory;
+            });
+
+            displayStrategies(filtered);
+        }
+
+        // Check URL parameters for filters
+        const urlParams = new URLSearchParams(window.location.search);
+        const expansionParam = urlParams.get('expansion');
+        const categoryParam = urlParams.get('category');
+
+        // Load on page load
+        loadStrategies();
+
+        // After strategies load, apply URL filters
+        if (expansionParam || categoryParam) {
+            setTimeout(() => {
+                if (expansionParam) {
+                    document.getElementById('expansion-filter').value = expansionParam;
+                }
+                if (categoryParam && document.getElementById('category-filter')) {
+                    document.getElementById('category-filter').value = categoryParam;
+                }
+                filterStrategies();
+            }, 500);
+        }
+    </script>
+</body>
+
+</html>

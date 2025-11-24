@@ -97,26 +97,16 @@ class SpecialEncounterHandler:
     @staticmethod
     def apply_mind_games(team: Team, active_pet: Pet):
         """
-        Mind Games of Addius: Damage entire team for % of current HP + 5-round stun
+        Mind Games of Addius: Damage entire team for % of MAX HP
         
-        Args:
-            team: Team to damage
-            active_pet: Pet to stun
+        Note: This is actually a choice mechanic (Damage vs Stun vs Lockout).
+        We implement the standard strategy choice: 25% Max HP damage to team.
         """
-        # Damage all pets for 25% of their current HP
+        # Damage all pets for 25% of their MAX HP
         for pet in team.pets:
             if pet.stats.is_alive():
-                damage = int(pet.stats.current_hp * 0.25)
+                damage = int(pet.stats.max_hp * 0.25)
                 pet.stats.take_damage(damage)
-        
-        # Apply 5-round stun to active pet
-        stun_buff = Buff(
-            type=BuffType.STUN,
-            duration=5,
-            magnitude=1.0,
-            source_ability=88888  # Special Mind Games ID
-        )
-        active_pet.active_buffs.append(stun_buff)
     
     @staticmethod
     def apply_bone_prison(pet: Pet):

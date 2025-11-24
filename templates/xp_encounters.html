@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Best XP Encounters - PetWeaver</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>XP Encounters</h1>
+            </div>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/dashboard">Dashboard</a>
+                <a href="/strategies">Strategies</a>
+                <a href="/hunting">Hunting</a>
+                <a href="/leveling">Pet Leveling</a>
+                <a href="/xp-encounters" class="active">XP Encounters</a>
+            </nav>
+        </header>
+        <main>
+            <div class="card">
+                <h2>Fast XP Encounters</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+                    These encounters give the best XP per minute. Click a card to see the strategy details.
+                </p>
+                <div id="xp-list">
+                    <div class="loading">Loading XP encounters...</div>
+                </div>
+            </div>
+        </main>
+        <div class="status-indicator" id="status-badge">IDLE</div>
+    </div>
+    <script>
+        // Fetch XP encounters from API
+        fetch('/api/xp-encounters')
+            .then(res => res.json())
+            .then(data => {
+                const container = document.getElementById('xp-list');
+                if (data.length === 0) {
+                    container.innerHTML = `<div class="card"><div class="empty">No XP encounters found.</div></div>`;
+                    return;
+                }
+                container.innerHTML = data.map(enc => `
+                    <div class="card" style="margin-bottom: 1rem;">
+                        <div style="display: flex; align-items: center; gap: 1rem;">
+                            <div style="font-size: 1.5rem; font-weight: 600; color: var(--primary); min-width: 50px;">
+                                ${enc.xp_score}
+                            </div>
+                            <div style="flex: 1;">
+                                <h3 style="margin: 0 0 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
+                                    ${enc.encounter}
+                                    <span class="badge" style="background: rgba(59,130,246,0.2); color: var(--primary);">${enc.speed}</span>
+                                    <span class="badge" style="background: rgba(245,158,11,0.2); color: #f59e0b;">Carry: ${enc.carry_slot}</span>
+                                </h3>
+                                <div style="margin-top: 0.5rem;">
+                                    <strong style="color: var(--text-muted); font-size: 0.9rem;">${enc.expansion} – ${enc.category}</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            })
+            .catch(err => {
+                console.error('Failed to load XP encounters', err);
+                document.getElementById('xp-list').innerHTML = `<div class="card"><div class="empty">Error loading data.</div></div>`;
+            });
+    </script>
+</body>
+
+</html>

@@ -136,7 +136,7 @@ class BuffTracker:
             },
             'call_darkness': {
                 'healing_reduction': -0.50,  # -50% healing
-                'hit_chance_bonus': 0.10,  # +10% accuracy (removes blindness for dark abilities)
+                'hit_chance_bonus': -0.10,  # -10% accuracy (standard Darkness)
                 'dot_damage': 0,  # Call Darkness doesn't do persistent DoT (just initial hit)
             },
         }

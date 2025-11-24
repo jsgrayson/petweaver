@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leveling Queue - PetWeaver</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>📈 Leveling Queue</h1>
+            </div>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/dashboard">Dashboard</a>
+                <a href="/strategies">Strategies</a>
+                <a href="/wizard">Wizard</a>
+                <a href="/hunting">Hunting</a>
+                <a href="/leveling" class="active">Leveling</a>
+            </nav>
+        </header>
+
+        <main>
+            <!-- Info -->
+            <div class="card">
+                <h2>Pet Leveling Priority</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+                    Pets you own that need leveling, sorted by how many encounters need them at level 25.
+                </p>
+            </div>
+
+            <!-- Leveling Queue -->
+            <div id="leveling-queue">
+                <div class="loading">Loading pets to level...</div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function loadLevelingQueue() {
+            fetch('/api/leveling/queue')
+                .then(res => res.json())
+                .then(data => {
+                    const container = document.getElementById('leveling-queue');
+
+                    if (data.length === 0) {
+                        container.innerHTML = `
+                            <div class="card">
+                                <div style="text-align: center; padding: 2rem; color: var(--success);">
+                                    <h2>🎉 All your pets are max level!</h2>
+                                    <p>No pets need leveling for your ready strategies.</p>
+                                </div>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    container.innerHTML = data.map((pet, index) => `
+                        <div class="card" style="margin-bottom: 1rem;">
+                            <div style="display: flex; align-items: center; gap: 1rem;">
+                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--primary); min-width: 50px;">
+                                    #${index + 1}
+                                </div>
+                                <div style="flex: 1;">
+                                    <h3 style="margin: 0 0 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
+                                        ${pet.name}
+                                        ${pet.needs_level ?
+                            `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b;">
+                                                Level ${pet.current_level} → 25
+                                            </span>` : ''
+                        }
+                                        ${pet.needs_rarity ?
+                            `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: var(--success);">
+                                                Upgrade Rarity
+                                            </span>` : ''
+                        }
+                                        <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: var(--primary);">
+                                            ${pet.priority} encounter(s)
+                                        </span>
+                                    </h3>
+                                    <div style="margin-top: 0.5rem;">
+                                        <strong style="color: var(--text-muted); font-size: 0.9rem;">Unlocks:</strong>
+                                        <div style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                                            ${pet.needed_for.slice(0, 4).map(enc =>
+                            `<span class="pet-badge">${enc}</span>`
+                        ).join('')}
+                                            ${pet.needed_for.length > 4 ?
+                            `<span style="color: var(--text-muted); font-size: 0.85rem;">+${pet.needed_for.length - 4} more</span>`
+                            : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                });
+        }
+
+        // Load on page load
+        loadLevelingQueue();
+    </script>
+</body>
+
+</html>
