@@ -74,6 +74,13 @@ class SmartAgent:
         enemy_active = state.player_team.get_active_pet()
         if not enemy_active: return None
         
+        # 0. Faster Kill (Priority #1)
+        # If we are faster and can kill, do it immediately.
+        if active_pet.stats.speed > enemy_active.stats.speed:
+            kill_ability = self._find_kill_ability(active_pet, enemy_active)
+            if kill_ability:
+                return TurnAction('enemy', 'ability', ability=kill_ability)
+
         # 1. Counter-CC (Cleanse)
         # Check if we are CC'd (Stun, Root, Sleep)
         is_cc = any(b.type in [BuffType.STUN, BuffType.ROOT, BuffType.SLEEP] for b in active_pet.active_buffs)
@@ -120,8 +127,35 @@ class SmartAgent:
             
             # Base Score: Damage
             # Estimate damage
-            damage, _ = self.damage_calc.calculate_damage(ability, active_pet, enemy_active, state.weather)
+            damage = 0
+            if not getattr(ability, 'is_heal', False):
+                damage, _ = self.damage_calc.calculate_damage(ability, active_pet, enemy_active, state.weather)
             score += damage
+            
+            # Healing Logic
+            if getattr(ability, 'is_heal', False):
+                # Calculate healing amount (approximate)
+                heal_amount = ability.power * 5 # Rough estimate if not using calc
+                # Check for healing reduction
+                healing_mod = 1.0
+                for b in active_pet.active_buffs:
+                    if b.stat_affected == 'healing_received':
+                        healing_mod *= (1.0 - b.magnitude)
+                
+                final_heal = heal_amount * healing_mod
+                
+                # Check if heal is futile (will die anyway)
+                # Estimate incoming damage (very rough: enemy power * 1.5)
+                estimated_incoming = enemy_active.stats.power * 1.5
+                current_hp = active_pet.stats.current_hp
+                
+                if current_hp + final_heal <= estimated_incoming:
+                    # Heal won't save us -> Futile
+                    heal_score = 0
+                else:
+                    heal_score = final_heal
+                
+                score += heal_score
             
             # Multipliers
             

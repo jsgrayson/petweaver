@@ -41,7 +41,10 @@ class TreeSearchAgent:
             
             print(f"DEBUG: Root Action {action.ability.name if action.ability else action.action_type} Value: {value}")
             
-            if value > best_value:
+            # Prefer higher value, and break ties by preferring healing abilities
+            if (value > best_value) or (
+                value == best_value and action.ability and action.ability.is_heal
+            ):
                 best_value = value
                 best_action = action
                 
@@ -121,6 +124,33 @@ class TreeSearchAgent:
         opp_alive = sum(1 for p in opp_team.pets if p.stats.is_alive())
         
         score += (my_alive - opp_alive) * 50
+        
+        # 3. Survival penalty: heavily penalize if active pet is low on HP
+        active_my = my_team.get_active_pet()
+        if active_my:
+            hp_ratio = active_my.stats.current_hp / active_my.stats.max_hp
+            if hp_ratio < 0.2:
+                score -= 200  # large penalty for being near death
+        
+        # 4. Secure kill bonus: reward if we can kill the opponent's active pet this turn
+        active_opp = opp_team.get_active_pet()
+        if active_my and active_opp:
+            # Estimate max damage we could deal this turn (simple heuristic)
+            max_damage = 0
+            for ab in active_my.abilities:
+                if not getattr(ab, 'is_heal', False):
+                    # Approximate damage using ability power and attacker power
+                    dmg = ab.power * (active_my.stats.power / 20)
+                    if dmg > max_damage:
+                        max_damage = dmg
+            if max_damage >= active_opp.stats.current_hp:
+                score += 100  # bonus for a guaranteed kill
+        
+        # 5. Healing incentive: if we have a heal ability and are low on HP, add modest bonus
+        if active_my:
+            has_heal = any(ab.is_heal for ab in active_my.abilities)
+            if has_heal and hp_ratio < 0.5:
+                score += 50
         
         return score
 

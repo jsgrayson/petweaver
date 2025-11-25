@@ -184,6 +184,74 @@ class TestSpecialMechanics(unittest.TestCase):
         
         # Defender should have 10% HP (100)
         self.assertEqual(defender_after.stats.current_hp, 100, "Defender should have swapped to 10% HP")
+    
+    def test_healing_reduction_debuff(self):
+        """Test Shadowlands healing reduction debuff (common mechanic)"""
+        # Create pet with healing ability
+        heal_ability = Ability(id=1, name="Heal", power=20, accuracy=100, speed=0, cooldown=0, family=PetFamily.BEAST, is_heal=True)
+        pet = Pet(species_id=1, name="Healer", family=PetFamily.BEAST,
+                 stats=PetStats(max_hp=1000, current_hp=500, power=300, speed=250),
+                 abilities=[heal_ability], quality=4)
+        
+        # Apply 50% healing reduction debuff
+        SpecialEncounterHandler.apply_healing_reduction(pet, reduction_pct=0.5, duration=3)
+        
+        # Verify debuff was applied
+        healing_debuff = None
+        for buff in pet.active_buffs:
+            if buff.stat_affected == 'healing_received':
+                healing_debuff = buff
+                break
+        
+        self.assertIsNotNone(healing_debuff, "Healing reduction debuff should be applied")
+        self.assertEqual(healing_debuff.magnitude, 0.5, "Debuff should be 50% reduction")
+        self.assertEqual(healing_debuff.duration, 3, "Debuff should last 3 rounds")
+        
+        # Create a simple state to test healing
+        enemy = Pet(species_id=2, name="Enemy", family=PetFamily.CRITTER,
+                   stats=PetStats(max_hp=1000, current_hp=1000, power=300, speed=250),
+                   abilities=[], quality=4)
+        
+        player_team = Team([pet])
+        enemy_team = Team([enemy])
+        state = BattleState(player_team, enemy_team)
+        
+        # Execute heal action
+        action = TurnAction('player', 'ability', ability=heal_ability)
+        enemy_action = TurnAction('enemy', 'pass')
+        
+        new_state = self.sim.execute_turn(state, action, enemy_action, turn_number=1)
+        
+        # Check that healing was reduced
+        # Normal heal would be ~300 HP (20 power * 15 from calculation)
+        # With 50% reduction, it should be ~150 HP
+        # So from 500 HP, should be around 650 HP (not full 800 HP)
+        healer_after = new_state.player_team.pets[0]
+        self.assertLess(healer_after.stats.current_hp, 700, "Healing should be reduced by debuff")
+        self.assertGreater(healer_after.stats.current_hp, 500, "Should still heal some amount")
+    
+    def test_massive_team_heal(self):
+        """Test The Impossible Boss massive team healing mechanic"""
+        # Create team with multiple low-HP pets
+        pet1 = Pet(species_id=1, name="Pet1", family=PetFamily.BEAST,
+                  stats=PetStats(max_hp=1000, current_hp=200, power=300, speed=250),
+                  abilities=[], quality=4)
+        pet2 = Pet(species_id=2, name="Pet2", family=PetFamily.FLYING,
+                  stats=PetStats(max_hp=1000, current_hp=300, power=300, speed=250),
+                  abilities=[], quality=4)
+        pet3 = Pet(species_id=3, name="Pet3", family=PetFamily.MAGIC,
+                  stats=PetStats(max_hp=1000, current_hp=100, power=300, speed=250),
+                  abilities=[], quality=4)
+        
+        team = Team([pet1, pet2, pet3])
+        
+        # Apply massive heal (500 HP to all pets)
+        SpecialEncounterHandler.apply_massive_team_heal(team, heal_amount=500)
+        
+        # Verify all pets were healed
+        self.assertEqual(pet1.stats.current_hp, 700, "Pet1 should heal from 200 to 700")
+        self.assertEqual(pet2.stats.current_hp, 800, "Pet2 should heal from 300 to 800")
+        self.assertEqual(pet3.stats.current_hp, 600, "Pet3 should heal from 100 to 600")
 
 if __name__ == '__main__':
     unittest.main()

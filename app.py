@@ -46,8 +46,137 @@ state = {
     }
 }
 
-# Initialize Strategy Manager
+from market_manager import MarketManager
+from combat_manager import CombatManager
+
+# Initialize Managers
 strategy_manager = StrategyManager(os.path.join(os.path.dirname(__file__), "strategies_cleaned.json"))
+market_manager = MarketManager()
+combat_manager = CombatManager()
+
+# ... (existing code) ...
+
+@app.route('/wishlist')
+def wishlist_page():
+    return render_template('wishlist.html')
+
+# Market Watcher API
+@app.route('/api/market/update', methods=['POST'])
+def update_market_price():
+    data = request.json
+    species_id = data.get('speciesId')
+    price = data.get('price') # In gold or copper
+    pet_name = data.get('petName', 'Unknown')
+    
+    if species_id and price is not None:
+        market_manager.update_price(species_id, price, pet_name)
+        
+        # Check for deals immediately?
+        # For now just log
+        # log_message(f"Market Update: {pet_name} = {price}")
+        return jsonify({"status": "success"})
+    return jsonify({"status": "error", "message": "Missing data"}), 400
+
+@app.route('/api/market/deals', methods=['GET'])
+def get_market_deals():
+    # Default threshold 50% (0.5)
+    threshold = float(request.args.get('threshold', 0.5))
+    deals = market_manager.get_deals(threshold)
+    return jsonify(deals)
+
+@app.route('/api/market/data', methods=['GET'])
+def get_market_data():
+    return jsonify(market_manager.get_all_data())
+
+@app.route('/market')
+def market_page():
+    return render_template('market.html')
+
+# Combat Log API
+@app.route('/api/combat/log', methods=['POST'])
+def log_combat_result():
+    data = request.json
+    result = data.get('result') # WIN/LOSS
+    enemy = data.get('enemy', 'Unknown')
+    my_team = data.get('myTeam', 'Unknown')
+    rounds = data.get('rounds', 0)
+    
+    if result:
+        combat_manager.log_battle(result, enemy, my_team, int(rounds))
+        return jsonify({"status": "success"})
+    return jsonify({"status": "error", "message": "Missing result"}), 400
+
+@app.route('/api/combat/history', methods=['GET'])
+def get_combat_history():
+    limit = int(request.args.get('limit', 50))
+    return jsonify(combat_manager.get_history(limit))
+
+@app.route('/api/combat/stats', methods=['GET'])
+def get_combat_stats():
+    return jsonify(combat_manager.get_stats())
+
+@app.route('/combat')
+def combat_page():
+    return render_template('combat_log.html')
+
+# Duplicate Consolidation API
+@app.route('/api/collection/duplicates', methods=['GET'])
+def get_duplicates():
+    if not os.path.exists('my_pets.json'):
+        return jsonify([])
+        
+    try:
+        with open('my_pets.json', 'r') as f:
+            data = json.load(f)
+            pets = data.get('pets', [])
+            
+        # Group by Species ID
+        groups = {}
+        for pet in pets:
+            sid = pet.get('speciesId')
+            if sid not in groups:
+                groups[sid] = []
+            groups[sid].append(pet)
+            
+        # Filter for duplicates
+        duplicates = []
+        for sid, group in groups.items():
+            if len(group) > 1:
+                # Sort by Level (desc), then Quality (desc) to help identify best
+                group.sort(key=lambda x: (x.get('level', 0), x.get('quality', 0)), reverse=True)
+                duplicates.append({
+                    "speciesId": sid,
+                    "petName": group[0].get('name', 'Unknown'), # Use name from first pet
+                    "count": len(group),
+                    "pets": group
+                })
+                
+        # Sort by count (desc)
+        duplicates.sort(key=lambda x: x['count'], reverse=True)
+        return jsonify(duplicates)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/duplicates')
+def duplicates_page():
+    return render_template('duplicates.html')
+
+# Collection Viewer API
+@app.route('/api/collection/all', methods=['GET'])
+def get_all_pets():
+    if not os.path.exists('my_pets.json'):
+        return jsonify([])
+    try:
+        with open('my_pets.json', 'r') as f:
+            data = json.load(f)
+            return jsonify(data.get('pets', []))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/collection')
+def collection_page():
+    return render_template('collection.html')
 
 def get_blizzard_client():
     """Returns a requests session with authentication headers, refreshing token if needed"""
@@ -108,12 +237,80 @@ def update_stats():
                 data = json.load(f)
                 count = 0
                 for exp in data.values():
-                    for cat in exp.values():
-                        count += len(cat)
-                state["stats"]["ready"] = count
-                
+                    count += len(exp)
+                state["stats"]["ready"] = count # Changed to 'ready' as per context
     except Exception as e:
-        log_message(f"Error updating stats: {e}")
+        print(f"Error updating stats: {e}")
+
+# Wishlist System
+WISHLIST_FILE = 'wishlist.json'
+
+def load_wishlist():
+    if os.path.exists(WISHLIST_FILE):
+        try:
+            with open(WISHLIST_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_wishlist(data):
+    with open(WISHLIST_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+@app.route('/api/wishlist', methods=['GET', 'POST', 'DELETE'])
+def manage_wishlist():
+    wishlist = load_wishlist()
+    
+    if request.method == 'GET':
+        return jsonify(wishlist)
+        
+    if request.method == 'POST':
+        data = request.json
+        # Check for duplicates
+        for item in wishlist:
+            if item['speciesId'] == data['speciesId'] and item['breedId'] == data['breedId']:
+                return jsonify({"status": "error", "message": "Item already in wishlist"}), 400
+                
+        wishlist.append({
+            "speciesId": data['speciesId'],
+            "petName": data.get('petName', 'Unknown'),
+            "breedId": data['breedId'],
+            "breedName": data.get('breedName', 'Unknown'), # e.g. P/P
+            "addedAt": datetime.now().isoformat()
+        })
+        save_wishlist(wishlist)
+        return jsonify({"status": "success", "wishlist": wishlist})
+        
+    if request.method == 'DELETE':
+        data = request.json
+        wishlist = [item for item in wishlist if not (
+            item['speciesId'] == data['speciesId'] and item['breedId'] == data['breedId']
+        )]
+        save_wishlist(wishlist)
+        return jsonify({"status": "success", "wishlist": wishlist})
+
+@app.route('/api/scan_wild_pet', methods=['POST'])
+def scan_wild_pet():
+    """Receives data about a wild pet and checks against wishlist"""
+    data = request.json
+    species_id = data.get('speciesId')
+    breed_id = data.get('breedId')
+    
+    wishlist = load_wishlist()
+    
+    for item in wishlist:
+        if int(item['speciesId']) == int(species_id) and int(item['breedId']) == int(breed_id):
+            # Match found!
+            alert_msg = f"🚨 WISHLIST ALERT: Found {item['petName']} with breed {item['breedName']}!"
+            log_message(alert_msg)
+            return jsonify({
+                "alert": True, 
+                "message": alert_msg,
+                "pet": item
+            })
+            
+    return jsonify({"alert": False})
 
 def run_automation_thread(skip_fetch, force_scrape, addon_path):
     global state
@@ -694,13 +891,47 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
         evaluator.real_abilities = real_abilities
         evaluator.real_pet_stats = real_pet_stats
         evaluator.pt_base_stats = pt_base_stats # Pass PetTracker base stats
-        
+        # 4. Initialize Evolution Engine
         engine = EvolutionEngine(evaluator, population_size=pop_size)
-        engine.initialize_population(available_species, formatted_ability_db)
         
-        print(f"DEBUG: Starting loop. Generations: {generations}")
+        # Pass strategy manager for seeding
+        engine.initialize_population(
+            available_species, 
+            species_abilities, 
+            npc_name=target_name,
+            strategy_manager=strategy_manager
+        )
         
-        # 4. Evolution Loop
+        genetic_state["log"].append("🧬 Population Initialized")
+        
+        # 4a. Pre-Check: Evaluate Seeded Teams
+        # We check the top few genomes (which are the seeds)
+        genetic_state["log"].append("🔍 Pre-Checking Known Strategies...")
+        pre_check_winners = []
+        
+        # Evaluate first 5 genomes (Seeds are at the front)
+        for i in range(min(5, len(engine.population))):
+            genome = engine.population[i]
+            fitness = evaluator.evaluate(genome)
+            genome.fitness = fitness
+            
+            # If fitness indicates a win (e.g., > 1000 or whatever our win threshold is)
+            # Actually, let's look at the win flag in the stats if available, 
+            # but evaluator returns a float. 
+            # Assuming high fitness = win.
+            # Better: Check if it's a "perfect" win (no deaths?) or just a win.
+            # For now, just log high fitness ones.
+            if fitness > 0:
+                pre_check_winners.append(genome)
+                
+        if pre_check_winners:
+            best_pre = max(pre_check_winners, key=lambda g: g.fitness)
+            genetic_state["log"].append(f"✨ Found strong starting team! Fitness: {best_pre.fitness:.1f}")
+            # We don't stop, but we ensure this team is preserved via elitism
+        else:
+            genetic_state["log"].append("No immediate wins from known strategies.")
+        
+        # 4b. Evolution Loop
         for gen in range(generations):
             if genetic_state["stop_flag"]:
                 break

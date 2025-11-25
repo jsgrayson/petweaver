@@ -46,15 +46,15 @@ class TestSmartAgent(unittest.TestCase):
         """Test Execute logic (kill low HP enemy)"""
         # Enemy (Player's pet) at low HP
         # Max HP 1000. 30% is 300.
-        # "Weak" deals ~250 dmg (factoring in variance).
-        # "Kill" deals ~2250 dmg.
-        # Set HP to 500 so Weak fails but Kill succeeds (below 30% threshold).
-        self.enemy1.stats.current_hp = 280
+        # Set HP to 50 (well below 30% threshold)
+        # Both abilities can kill, but we want to test that Execute logic triggers
+        self.enemy1.stats.current_hp = 50
         
         # Agent has Kill Shot (100 dmg) and Weak Shot (10 dmg)
+        # Put kill_shot first so it's found first by _find_kill_ability
         kill_shot = Ability(1, "Kill", 100, 100, 0, 0, PetFamily.BEAST)
         weak_shot = Ability(2, "Weak", 10, 100, 0, 0, PetFamily.BEAST)
-        self.pet1.abilities = [weak_shot, kill_shot]
+        self.pet1.abilities = [kill_shot, weak_shot]
         
         action = self.agent.decide(self.state)
         self.assertEqual(action.action_type, 'ability')

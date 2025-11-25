@@ -369,7 +369,16 @@ class BattleSimulator:
             if ability.is_heal:
                 # Healing ability
                 heal_amount = self.damage_calc.calculate_healing(ability, attacker)
-                actual_heal = attacker.stats.heal(heal_amount)
+                
+                # Check for healing reduction debuffs
+                healing_modifier = 1.0
+                for buff in attacker.active_buffs:
+                    if buff.type == BuffType.STAT_MOD and buff.stat_affected == 'healing_received':
+                        healing_modifier *= (1.0 - buff.magnitude)  # Reduce healing
+                
+                # Apply healing reduction
+                final_heal = int(heal_amount * healing_modifier)
+                actual_heal = attacker.stats.heal(final_heal)
                 
                 self.log.add_event({
                     'type': 'heal',

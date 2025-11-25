@@ -272,6 +272,12 @@ class DamageCalculator:
         # Final rounding (Module 6: Round DOWN)
         final_damage = math.floor(final_damage)
         
+        # Check for False Swipe / Cannot Kill
+        if getattr(ability, 'cannot_kill', False):
+            # Ensure damage leaves at least 1 HP
+            if final_damage >= defender.stats.current_hp:
+                final_damage = max(0, defender.stats.current_hp - 1)
+        
         details['final_damage'] = final_damage
         
         return final_damage, details

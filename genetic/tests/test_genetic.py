@@ -47,7 +47,7 @@ def test_mutation():
     original_species = [p.species_id for p in genome.pets]
     
     # Force mutation
-    genome.mutate(MOCK_SPECIES, mutation_rate=1.0)
+    genome.mutate(MOCK_SPECIES, MOCK_ABILITY_DB, mutation_rate=1.0)
     
     # At least one thing should likely change with 100% rate
     # (Though random choice could pick same species, so this is probabilistic)

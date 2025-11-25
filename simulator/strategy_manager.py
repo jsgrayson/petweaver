@@ -119,3 +119,21 @@ class StrategyManager:
         
         script = strategy.get('script', '')
         return f"{encounter_name}:{pet_ids[0]}:{pet_ids[1]}:{pet_ids[2]}:{script}"
+
+    def get_recommended_team(self, npc_name):
+        """
+        Returns a list of recommended pet IDs for the given NPC.
+        Format: [Pet1ID, Pet2ID, Pet3ID] (0 for empty slots)
+        """
+        strategy_data = self.get_strategy(npc_name)
+        if not strategy_data:
+            return None
+            
+        pet_ids = [0, 0, 0]
+        for i, slot in enumerate(strategy_data.get('pet_slots', [])):
+            if i < 3 and slot:
+                # Slot is a list of options, pick first
+                if isinstance(slot, list) and len(slot) > 0:
+                    pet_ids[i] = slot[0].get('id', 0)
+        
+        return pet_ids

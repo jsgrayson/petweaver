@@ -1,4 +1,21 @@
 {
+  "squirt": {
+    "id": 99999,
+    "name": "Squirt",
+    "npc_pets": [
+      {
+        "species_id": 1,
+        "name": "Placeholder",
+        "family": "Beast",
+        "quality": "common",
+        "health": 100,
+        "power": 10,
+        "speed": 10,
+        "abilities": []
+      }
+    ],
+    "strategy": "default"
+  },
   "julia-stevens": {
     "id": 64330,
     "name": "Julia Stevens",

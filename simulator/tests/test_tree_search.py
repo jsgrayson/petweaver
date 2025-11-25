@@ -20,7 +20,7 @@ class TestTreeSearch(unittest.TestCase):
         
         p1 = Pet(
             species_id=1, name="Player", 
-            stats=PetStats(100, 5, 10, 10), # 100 Max, 5 Current - Will die to 10 dmg hit
+            stats=PetStats(100, 8, 10, 10), # 100 Max, 8 Current - Will die to 20 dmg hit
             family=PetFamily.HUMANOID, quality=PetQuality.RARE, 
             abilities=[
                 Ability(id=1, name="Attack", power=10, accuracy=100, speed=0, family=PetFamily.HUMANOID, cooldown=0),

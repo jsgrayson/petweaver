@@ -160,3 +160,36 @@ class SpecialEncounterHandler:
             source_ability=66666  # Special Shell Shield ID
         )
         pet.active_buffs.append(shield_buff)
+    
+    @staticmethod
+    def apply_healing_reduction(pet: Pet, reduction_pct: float = 0.5, duration: int = 3):
+        """
+        Apply healing reduction debuff (common in Shadowlands encounters)
+        
+        Args:
+            pet: Pet to debuff
+            reduction_pct: Percentage to reduce healing (0.5 = 50% reduction)
+            duration: Duration in rounds
+        """
+        healing_debuff = Buff(
+            type=BuffType.STAT_MOD,
+            duration=duration,
+            magnitude=reduction_pct,  # 50% healing reduction by default
+            stat_affected='healing_received',
+            source_ability=88888,  # Special Healing Reduction ID
+            name="Healing Reduction"
+        )
+        pet.active_buffs.append(healing_debuff)
+    
+    @staticmethod
+    def apply_massive_team_heal(team: Team, heal_amount: int):
+        """
+        The Impossible Boss: Massive team healing every few turns
+        
+        Args:
+            team: Team to heal
+            heal_amount: Amount to heal each pet
+        """
+        for pet in team.pets:
+            if pet.stats.is_alive():
+                pet.stats.heal(heal_amount)

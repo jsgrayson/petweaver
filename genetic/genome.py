@@ -92,6 +92,29 @@ class TeamGenome:
             
         return genome
 
+    @classmethod
+    def from_team_ids(cls, team_ids: List[int], ability_db: Dict):
+        """Create a genome from a specific list of pet IDs"""
+        genome = cls()
+        
+        for species_id in team_ids:
+            if species_id == 0: continue # Skip empty slots
+            
+            # Get valid abilities
+            possible_abilities = ability_db.get(species_id, [1, 2, 3, 4, 5, 6])
+            selected_abilities = cls._select_valid_abilities(possible_abilities)
+            
+            # Default strategy
+            strategy = StrategyGene()
+            
+            genome.pets.append(PetGene(
+                species_id=species_id,
+                abilities=selected_abilities,
+                strategy=strategy
+            ))
+            
+        return genome
+
     def mutate(self, available_species: List[int], ability_db: Dict, mutation_rate: float = 0.1):
         """Randomly modify the genome"""
         mutated = False

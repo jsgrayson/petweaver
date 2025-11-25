@@ -102,6 +102,7 @@ class Ability:
     delayed_turns: int = 0  # e.g. 3 for Geyser/Whirlpool
     effect_type: Optional[str] = None  # e.g. 'stun', 'swap', 'heal_team'
     effect_chance: int = 100  # Percent chance for effect
+    cannot_kill: bool = False  # If True, damage cannot reduce HP below 1 (False Swipe)
     
     def __hash__(self):
         return hash(self.id)
