@@ -98,6 +98,27 @@ class FitnessEvaluator:
                 turn_number=1
             )
             
+            # Adaptive Mulligan (Run only on first battle to save time, or every battle?)
+            # Since teams are reset, the optimal starter should be the same every time unless RNG varies wildly.
+            # Let's run it on the first battle and reuse the index? 
+            # Or run it every time if we want to test consistency.
+            # For performance, let's run it once per evaluation (before the loop) or just for the first battle.
+            # Actually, let's run it for the first battle and assume it sticks.
+            if _ == 0:
+                best_start_idx = self.simulator.simulate_mulligan(
+                    battle_state, 
+                    genome_agent, 
+                    enemy_agent, 
+                    depth=3
+                )
+                # Apply best start
+                battle_state.player_team.active_pet_index = best_start_idx
+                # Also update the player_team template so subsequent battles use it?
+                player_team.active_pet_index = best_start_idx
+            else:
+                # Use the cached best start from player_team template
+                battle_state.player_team.active_pet_index = player_team.active_pet_index
+            
             result = self.simulator.simulate_battle(battle_state, genome_agent, enemy_agent, max_turns=30)
             
             # Track damage dealt to enemy (even in losses)
@@ -209,6 +230,30 @@ class FitnessEvaluator:
                     current_hp=species_stats['health'],
                     power=species_stats['power'],
                     speed=species_stats['speed']
+                )
+            # Use PetTracker Base Stats for unowned pets
+            elif hasattr(self, 'pt_base_stats') and str(gene.species_id) in self.pt_base_stats:
+                base = self.pt_base_stats[str(gene.species_id)]
+                # Calculate Level 25 Rare (Blue) stats
+                # Formula approximation:
+                # HP = Base * 17.5? No, usually Base * 10 + 100?
+                # Let's use standard multipliers for Level 25 Rare:
+                # HP ~= Base * 100 (No, that's too high). 
+                # Base stats in PetTracker are usually 7-9 range.
+                # Real stats are ~1400. 1400 / 8 = 175.
+                # Power ~280 / 8 = 35.
+                # Speed ~280 / 8 = 35.
+                
+                # Using 175, 35, 35 multipliers as per plan
+                hp = int(base.get('health', 8) * 175)
+                power = int(base.get('power', 8) * 35)
+                speed = int(base.get('speed', 8) * 35)
+                
+                stats = PetStats(
+                    max_hp=hp,
+                    current_hp=hp,
+                    power=power,
+                    speed=speed
                 )
             else:
                 # Fallback to level 25 rare baseline

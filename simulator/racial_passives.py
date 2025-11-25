@@ -136,19 +136,24 @@ class RacialPassives:
         return actual_heal
     
     @staticmethod
-    def apply_magic_passive(pet: Pet, incoming_damage: int) -> int:
+    def apply_magic_passive(pet: Pet, incoming_damage: int, hits: int = 1) -> int:
         """
         Magic: Cannot take more than 35% of max HP in one hit
         
         Args:
             pet: The magic pet receiving damage
-            incoming_damage: Damage before cap
+            incoming_damage: Total damage before cap
+            hits: Number of hits in the ability
             
         Returns:
             Capped damage amount
         """
-        max_damage = int(pet.stats.max_hp * 0.35)
-        return min(incoming_damage, max_damage)
+        # Cap applies PER HIT.
+        # So total cap = (35% max HP) * hits
+        cap_per_hit = int(pet.stats.max_hp * 0.35)
+        total_cap = cap_per_hit * hits
+        
+        return min(incoming_damage, total_cap)
     
     @staticmethod
     def apply_aquatic_passive() -> float:

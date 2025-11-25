@@ -212,12 +212,18 @@
                 <h3>Target Configuration</h3>
                 <div class="form-group">
                     <label>Target Encounter</label>
-                    <select id="target-encounter" onchange="updateTargetInfo()">
-                        {% for id, data in encounters.items() %}
-                        <option value="{{ id }}">{{ data.name }}</option>
-                        {% endfor %}
-                        <option value="dummy">Target Dummy (Test)</option>
-                    </select>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <select id="target-encounter" onchange="updateTargetInfo()" style="flex: 1;">
+                            {% for id, data in encounters.items() %}
+                            <option value="{{ id }}">{{ data.name }}</option>
+                            {% endfor %}
+                            <option value="dummy">Target Dummy (Test)</option>
+                        </select>
+                        <button type="button" class="btn-secondary" onclick="fetchStrategy()"
+                            title="Fetch proven strategy" style="width: auto; padding: 0 1rem;">
+                            📜 Strategy
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Target Info Display -->
@@ -225,6 +231,19 @@
                     style="margin-top: 1rem; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 6px; display: none;">
                     <h4 style="color: var(--text-muted); margin-bottom: 0.5rem; font-size: 0.9rem;">Enemy Team</h4>
                     <div id="target-pets" style="display: flex; gap: 0.5rem; flex-wrap: wrap;"></div>
+                </div>
+
+                <!-- Strategy Display -->
+                <div id="strategy-display"
+                    style="margin-top: 1rem; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 6px; display: none; border-left: 3px solid var(--wow-gold);">
+                    <h4 style="color: var(--wow-gold); margin-bottom: 0.5rem; font-size: 0.9rem;">Proven Strategy</h4>
+                    <div id="strategy-content"
+                        style="font-size: 0.8rem; color: #ccc; white-space: pre-wrap; font-family: monospace; max-height: 150px; overflow-y: auto;">
+                    </div>
+                    <button class="btn-primary" style="margin-top: 0.5rem; width: 100%; font-size: 0.7rem;"
+                        onclick="copyStrategy()">
+                        📋 Copy Import String
+                    </button>
                 </div>
 
                 <div class="form-group">
@@ -606,6 +625,50 @@
                 isRunning = false;
                 clearInterval(pollInterval);
                 document.getElementById('status-text').innerText = "Stopped";
+            }
+
+            async function fetchStrategy() {
+                const select = document.getElementById('target-encounter');
+                const targetId = select.value;
+                // Get text name
+                const targetName = select.options[select.selectedIndex].text;
+
+                if (targetId === 'dummy') {
+                    alert('No strategy for dummy target.');
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`/api/strategy/fetch?npc_name=${encodeURIComponent(targetName)}`);
+                    const data = await response.json();
+
+                    if (data.found) {
+                        const display = document.getElementById('strategy-display');
+                        const content = document.getElementById('strategy-content');
+
+                        // Store rematch string for copy
+                        display.dataset.rematch = data.strategy.rematch_string;
+
+                        content.innerText = `Strategy: ${data.strategy.strategy_name}\n\nScript:\n${data.strategy.script}`;
+                        display.style.display = 'block';
+                    } else {
+                        alert('No strategy found for this encounter.');
+                        document.getElementById('strategy-display').style.display = 'none';
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert('Error fetching strategy.');
+                }
+            }
+
+            function copyStrategy() {
+                const display = document.getElementById('strategy-display');
+                const str = display.dataset.rematch;
+                if (str) {
+                    navigator.clipboard.writeText(str).then(() => {
+                        alert('Strategy import string copied!');
+                    });
+                }
             }
         </script>
 </body>

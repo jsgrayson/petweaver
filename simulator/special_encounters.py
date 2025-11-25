@@ -20,7 +20,10 @@ class SpecialEncounterHandler:
     
     # Encounter registry: Maps species IDs to their special mechanics
     SPECIAL_MECHANICS = {
-        1811: 'rocko_immunity',  # Rocko species ID
+        1811: 'rocko_immunity',  # Rocko
+        1187: 'gore_stacks',     # Gorespine
+        1400: 'bone_prison',     # Jawbone (Bastion)
+        1300: 'life_exchange',   # Dah'da (Wrathion) - Tentative
         # Add more as we implement them
     }
     

@@ -49,6 +49,7 @@ class BuffType(Enum):
     ROOT = "root"
     SLEEP = "sleep"
     DELAYED_EFFECT = "delayed_effect"
+    INVULNERABILITY = "invulnerability"
 
 
 @dataclass

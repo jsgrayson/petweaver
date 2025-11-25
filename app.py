@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 import automate
 import requests
+from simulator.strategy_manager import StrategyManager
 
 # Load .env manually
 if os.path.exists('.env'):
@@ -44,6 +45,9 @@ state = {
         "ready": 0
     }
 }
+
+# Initialize Strategy Manager
+strategy_manager = StrategyManager(os.path.join(os.path.dirname(__file__), "strategies_cleaned.json"))
 
 def get_blizzard_client():
     """Returns a requests session with authentication headers, refreshing token if needed"""
@@ -677,17 +681,19 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
         
         # Build species_db with family information for type advantage calculations
         species_db = {}
-        if 'species_info_map' in locals():
-            for sid, info in species_info_map.items():
-                species_db[sid] = {
-                    'family_id': info.get('family_id', 7),  # Default to Beast (7)
-                    'family_name': info.get('family_name', 'Beast')
-                }
+        # Initialize Fitness Evaluator
+        evaluator = FitnessEvaluator(
+            target_team=target_team,
+            ability_db=real_abilities,
+            species_db=species_info_map,
+            npc_priorities=npc_priorities,
+            target_name=target_name
+        )
         
-        evaluator = FitnessEvaluator(target_team, formatted_ability_db, species_db, npc_priorities, target_name=target_name)
-        # Monkey patch the ability lookup and pet stats (hack for MVP)
+        # Monkey-patch real data into evaluator
         evaluator.real_abilities = real_abilities
         evaluator.real_pet_stats = real_pet_stats
+        evaluator.pt_base_stats = pt_base_stats # Pass PetTracker base stats
         
         engine = EvolutionEngine(evaluator, population_size=pop_size)
         engine.initialize_population(available_species, formatted_ability_db)
@@ -1780,6 +1786,26 @@ def get_squirt_status():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/strategy/fetch')
+def fetch_strategy():
+    """Fetch a strategy for a given NPC"""
+    npc_name = request.args.get('npc_name')
+    if not npc_name:
+        return jsonify({"error": "Missing npc_name parameter"}), 400
+        
+    strategy = strategy_manager.get_strategy(npc_name)
+    
+    if strategy:
+        return jsonify({
+            "found": True,
+            "strategy": strategy
+        })
+    else:
+        return jsonify({
+            "found": False,
+            "message": "Strategy not found in local database."
+        })
 
 if __name__ == '__main__':
     update_stats()

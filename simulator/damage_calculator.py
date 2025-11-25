@@ -90,14 +90,18 @@ class DamageCalculator:
     def check_hit(self, ability: Ability, attacker: Pet, defender: Pet, weather: Optional[Buff] = None) -> bool:
         """Determine if ability hits (based on accuracy)"""
         # Natural 100% accuracy
-        if ability.accuracy >= 100:
-            return True
+        # Note: Even 100% accuracy moves can be dodged, so we don't return early.
+        # Only "Always Hits" (accuracy > 100 usually implies this in some systems, but here we stick to formula)
+        # if ability.accuracy >= 100:
+        #     return True
         
         # Check dodge buffs on defender
         dodge_chance = 0.0
         for buff in defender.active_buffs:
             if buff.type == BuffType.STAT_MOD and buff.stat_affected == 'dodge':
                 dodge_chance += buff.magnitude
+            elif buff.type == BuffType.INVULNERABILITY:
+                return False
         
         # Check weather accuracy modifiers
         weather_mod = 0.0
@@ -259,7 +263,9 @@ class DamageCalculator:
         
         # Apply Magic racial passive (damage cap at 35% max HP)
         if defender.family == PetFamily.MAGIC:
-            final_damage = RacialPassives.apply_magic_passive(defender, final_damage)
+            # Pass ability.hits to handle multi-hit cap correctly
+            hits = getattr(ability, 'hits', 1)
+            final_damage = RacialPassives.apply_magic_passive(defender, final_damage, hits)
         
         # Minimum 1 damage if hit
         final_damage = max(1, final_damage)

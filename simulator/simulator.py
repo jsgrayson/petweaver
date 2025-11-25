@@ -99,6 +99,93 @@ class BattleSimulator:
             'events': self.log.events
         }
     
+    def simulate_mulligan(
+        self,
+        initial_state: BattleState,
+        player_agent: Callable[['BattleState'], TurnAction],
+        enemy_agent: Callable[['BattleState'], TurnAction],
+        depth: int = 3
+    ) -> int:
+        """
+        Simulate battle starts with each pet to find best lead.
+        Returns index of best starting pet.
+        """
+        best_pet_idx = initial_state.player_team.active_pet_index
+        best_score = -float('inf')
+        
+        # Identify living pets
+        living_indices = [
+            i for i, p in enumerate(initial_state.player_team.pets) 
+            if p.stats.is_alive()
+        ]
+        
+        if len(living_indices) <= 1:
+            return living_indices[0] if living_indices else 0
+            
+        for idx in living_indices:
+            # Clone state for simulation
+            sim_state = initial_state.copy()
+            sim_state.player_team.active_pet_index = idx
+            
+            # Run short simulation
+            # We need a fresh log for this sub-simulation to avoid polluting main log?
+            # Actually simulate_battle resets the log. We should be careful not to lose main log if this is called mid-battle.
+            # But this is called BEFORE battle, so it's fine.
+            # However, we should probably use a temporary simulator or just save/restore log?
+            # simulate_battle creates a NEW log. So self.log will be overwritten.
+            # We should probably instantiate a temporary simulator or modify simulate_battle to accept a log?
+            # Easier: Just instantiate a new simulator for mulligan.
+            # But we are INSIDE the simulator class. 
+            # We can just save self.log and restore it.
+            
+            original_log = self.log
+            
+            # Run simulation
+            result = self.simulate_battle(
+                sim_state, 
+                player_agent, 
+                enemy_agent, 
+                max_turns=depth,
+                special_encounter_id=None # Assuming no special mechanics for mulligan for now
+            )
+            
+            # Restore log
+            self.log = original_log
+            
+            # Calculate Score
+            # Score = (Enemy HP Lost * 1.5) - (Player HP Lost)
+            
+            # Enemy HP Lost
+            initial_enemy_hp = sum(p.stats.current_hp for p in initial_state.enemy_team.pets)
+            final_enemy_hp = sum(p.stats.current_hp for p in result['final_state'].enemy_team.pets)
+            enemy_hp_lost = initial_enemy_hp - final_enemy_hp
+            
+            # Player HP Lost
+            initial_player_hp = sum(p.stats.current_hp for p in initial_state.player_team.pets)
+            final_player_hp = sum(p.stats.current_hp for p in result['final_state'].player_team.pets)
+            player_hp_lost = initial_player_hp - final_player_hp
+            
+            score = (enemy_hp_lost * 1.5) - player_hp_lost
+            
+            # Buff Score (Bonus for beneficial buffs, penalty for harmful)
+            # Simplified: Just check active pet buffs
+            active_pet = result['final_state'].player_team.get_active_pet()
+            if active_pet:
+                for buff in active_pet.active_buffs:
+                    if buff.type in [BuffType.SHIELD, BuffType.HOT, BuffType.STAT_MOD]:
+                        if buff.magnitude > 0: # Positive stat mod
+                            score += 50
+                    elif buff.type in [BuffType.DOT, BuffType.STUN]:
+                        score -= 50
+            
+            # print(f"DEBUG: Mulligan Pet {idx} ({initial_state.player_team.pets[idx].name}) Score: {score}")
+            
+            if score > best_score:
+                best_score = score
+                best_pet_idx = idx
+                
+        return best_pet_idx
+    
     def _get_action(
         self, 
         script: Union[List[TurnAction], Callable[['BattleState'], TurnAction]], 
@@ -324,6 +411,34 @@ class BattleSimulator:
                             'condition': ability.bonus_condition
                         })
 
+                # Check for Traps on Defender (triggered when attacked)
+                # If defender has a Trap buff, it triggers now
+                traps_triggered = []
+                for buff in defender.active_buffs:
+                    if buff.type == BuffType.DELAYED_EFFECT and "Trap" in buff.name:
+                        # Trigger Trap
+                        traps_triggered.append(buff)
+                        
+                        # Deal damage to Attacker
+                        trap_damage = int(buff.magnitude)
+                        actual_damage = attacker.stats.take_damage(trap_damage)
+                        
+                        self.log.add_event({
+                            'type': 'trap_triggered',
+                            'trap': buff.name,
+                            'target': attacker.name,
+                            'damage': actual_damage
+                        })
+                        
+                        # Check if attacker died from trap
+                        if not attacker.stats.is_alive():
+                            self.log.add_event({'type': 'death', 'pet': attacker.name})
+                            return # Attack stops if attacker dies
+                
+                # Remove triggered traps
+                for buff in traps_triggered:
+                    defender.active_buffs.remove(buff)
+
                 damage, details = self.damage_calc.calculate_damage(
                     ability, attacker, defender, state.weather
                 )
@@ -483,27 +598,70 @@ class BattleSimulator:
                         'buff': stat,
                         'duration': duration
                     })
+            
+            # Module 9: High-Risk Logic (Explode, Burrow, Fly, Haunt)
+            if ability.effect_type == 'explode':
+                # Explode: Kills user immediately (even on miss)
+                attacker.stats.current_hp = 0
+                self.log.add_event({
+                    'type': 'suicide',
+                    'pet': attacker.name,
+                    'reason': 'explode'
+                })
+            
+            elif ability.effect_type == 'haunt':
+                # Haunt: Kills user ONLY if it hits
+                if details['hit']:
+                    attacker.stats.current_hp = 0
+                    self.log.add_event({
+                        'type': 'suicide',
+                        'pet': attacker.name,
+                        'reason': 'haunt'
+                    })
+                    # Apply Haunt debuff to defender
+                    haunt_buff = Buff(
+                        type=BuffType.DOT, # Simplified as DoT for now
+                        duration=4,
+                        magnitude=ability.power, # Use ability power for DoT
+                        source_ability=ability.name,
+                        name="Haunted"
+                    )
+                    self.buff_tracker.add_buff(defender, haunt_buff)
+            
+            elif ability.effect_type in ['burrow', 'fly']:
+                # Burrow/Fly: Apply Invulnerability
+                invuln_buff = Buff(
+                    type=BuffType.INVULNERABILITY,
+                    duration=2, 
+                    magnitude=1.0,
+                    source_ability=ability.name
+                )
+                self.buff_tracker.add_buff(attacker, invuln_buff)
+                self.log.add_event({
+                    'type': 'buff_applied',
+                    'target': attacker.name,
+                    'buff': 'Invulnerability',
+                    'source': ability.effect_type
+                })
     
     def process_end_of_turn(self, state: BattleState, player_pet: Optional[Pet], enemy_pet: Optional[Pet]):
-        """Process end-of-turn effects (DoTs, HoTs, buff expiration)"""
-        # Process Undead revive turns
-        for pet in [player_pet, enemy_pet]:
-            if pet and pet.has_undead_revive:
-                pet.revive_turns_remaining -= 1
-                if pet.revive_turns_remaining <= 0:
-                    # Undead revive expired, pet truly dies
-                    pet.stats.current_hp = 0
-                    pet.has_undead_revive = False
-                    self.log.add_event({
-                        'type': 'undead_revive_expired',
-                        'pet': pet.name
-                    })
-        
-        # Process weather DoT damage
+        """
+        Process end-of-turn effects with strict ordering:
+        1. Weather Damage
+        2. Death Check
+        3. DoTs
+        4. Death Check
+        5. HoTs
+        6. Buff Decrement/Expiration
+        7. Death Check
+        """
+        active_pets = []
+        if player_pet and player_pet.stats.is_alive(): active_pets.append((player_pet, 'player'))
+        if enemy_pet and enemy_pet.stats.is_alive(): active_pets.append((enemy_pet, 'enemy'))
+
+        # --- 1. Weather Damage ---
         if state.weather and state.weather.type == BuffType.WEATHER:
-            weather_name = getattr(state.weather, 'stat_affected', None)  # Using stat_affected to store weather name
-            
-            # Weather DoT effects
+            weather_name = getattr(state.weather, 'stat_affected', None)
             weather_dots = {
                 'scorched_earth': {'damage': 35, 'family': 'Dragonkin', 'immune': PetFamily.ELEMENTAL},
                 'call_lightning': {'damage': 30, 'family': 'Elemental', 'immune': None},
@@ -511,80 +669,70 @@ class BattleSimulator:
             
             if weather_name in weather_dots:
                 weather_info = weather_dots[weather_name]
-                
-                for pet, target_name in [(player_pet, 'player'), (enemy_pet, 'enemy')]:
-                    if pet and pet.stats.is_alive():
-                        # Check if pet is immune (Elemental racial passive)
-                        is_immune = False
-                        if weather_info['immune'] and pet.family == weather_info['immune']:
-                            is_immune = True
-                        elif pet.family == PetFamily.ELEMENTAL:
-                            # Elementals immune to all weather damage
-                            is_immune = RacialPassives.apply_elemental_passive()
-                        
-                        if not is_immune:
-                            damage = weather_info['damage']
-                            actual_damage = pet.stats.take_damage(damage)
-                            self.log.add_event({
-                                'type': 'weather_dot',
-                                'weather': weather_name,
-                                'target': target_name,
-                                'pet': pet.name,
-                                'damage': actual_damage
-                            })
-        # Process buff ticks
-        if player_pet and player_pet.stats.is_alive():
-            events = self.buff_tracker.tick_all_buffs(player_pet)
-            for event in events:
-                self.log.add_event(event)
-                # Handle delayed effects
-                if event['type'] == 'delayed_stun':
-                    # Apply Stun
-                    stun_buff = Buff(type=BuffType.STUN, duration=1, magnitude=1.0, source_ability=999)
-                    self.buff_tracker.add_buff(player_pet, stun_buff)
-                    self.log.add_event({'type': 'stun_applied', 'target': player_pet.name, 'source': 'Geyser'})
-                elif event['type'] == 'delayed_root':
-                    # Apply Root
-                    root_buff = Buff(type=BuffType.ROOT, duration=2, magnitude=1.0, source_ability=998)
-                    self.buff_tracker.add_buff(player_pet, root_buff)
-                    self.log.add_event({'type': 'root_applied', 'target': player_pet.name, 'source': 'Whirlpool'})
-                elif event['type'] == 'buff_expired':
-                    # Module 6: CC Immunity Clock
-                    # If Stun/Root/Sleep expired, add 4-round immunity
-                    expired_buff = event['buff']
-                    if expired_buff.type in [BuffType.STUN, BuffType.ROOT, BuffType.SLEEP]:
-                        immunity_buff = Buff(type=BuffType.IMMUNITY, duration=4, magnitude=1.0, source_ability=0, stat_affected=expired_buff.type.value)
-                        # Note: We need to handle specific immunity type in buff_tracker or just use generic IMMUNITY type?
-                        # BuffType.IMMUNITY usually means "Immune to Damage".
-                        # We need "Immune to CC".
-                        # Let's use a custom stat_affected for CC immunity.
-                        # Actually, let's use a new BuffType or just handle it in add_buff.
-                        # We'll use BuffType.IMMUNITY but with stat_affected='cc_immunity' or specific type.
-                        # Let's use 'cc_immunity' for now and update add_buff to check it.
-                        # Actually, let's just use the specific type name as stat_affected.
-                        self.buff_tracker.add_buff(player_pet, immunity_buff)
-                        self.log.add_event({'type': 'cc_immunity_applied', 'target': player_pet.name})
+                for pet, target_name in active_pets:
+                    if not pet.stats.is_alive(): continue
+                    
+                    is_immune = False
+                    if weather_info['immune'] and pet.family == weather_info['immune']:
+                        is_immune = True
+                    elif pet.family == PetFamily.ELEMENTAL:
+                        is_immune = RacialPassives.apply_elemental_passive()
+                    
+                    if not is_immune:
+                        damage = weather_info['damage']
+                        actual_damage = pet.stats.take_damage(damage)
+                        self.log.add_event({
+                            'type': 'weather_dot',
+                            'weather': weather_name,
+                            'target': target_name,
+                            'pet': pet.name,
+                            'damage': actual_damage
+                        })
 
-        if enemy_pet and enemy_pet.stats.is_alive():
-            events = self.buff_tracker.tick_all_buffs(enemy_pet)
+        # --- 2. Death Check (Post-Weather) ---
+        if self._check_deaths(player_pet, enemy_pet): return
+
+        # --- 3. DoTs (Damage Over Time) ---
+        for pet, _ in active_pets:
+            if not pet.stats.is_alive(): continue
+            events = self.buff_tracker.process_dots(pet)
             for event in events:
                 self.log.add_event(event)
-                # Handle delayed effects
-                if event['type'] == 'delayed_stun':
-                    stun_buff = Buff(type=BuffType.STUN, duration=1, magnitude=1.0, source_ability=999)
-                    self.buff_tracker.add_buff(enemy_pet, stun_buff)
-                    self.log.add_event({'type': 'stun_applied', 'target': enemy_pet.name, 'source': 'Geyser'})
-                elif event['type'] == 'delayed_root':
-                    root_buff = Buff(type=BuffType.ROOT, duration=2, magnitude=1.0, source_ability=998)
-                    self.buff_tracker.add_buff(enemy_pet, root_buff)
-                    self.log.add_event({'type': 'root_applied', 'target': enemy_pet.name, 'source': 'Whirlpool'})
+
+        # --- 4. Death Check (Post-DoTs) ---
+        # This is the critical check: DoTs must kill BEFORE HoTs tick
+        if self._check_deaths(player_pet, enemy_pet): return
+
+        # --- 5. HoTs (Heal Over Time) ---
+        for pet, _ in active_pets:
+            if not pet.stats.is_alive(): continue
+            events = self.buff_tracker.process_hots(pet)
+            for event in events:
+                self.log.add_event(event)
+
+        # --- 6. Buff Decrement & Expiration ---
+        for pet, _ in active_pets:
+            if not pet.stats.is_alive(): continue
+            events = self.buff_tracker.decrement_durations(pet)
+            for event in events:
+                self.log.add_event(event)
+                
+                # Handle delayed effects (Geyser/Whirlpool/etc)
+                if event['type'] == 'delayed_damage':
+                     # Check if damage killed pet immediately
+                     if not pet.stats.is_alive():
+                         self.log.add_event({'type': 'death', 'pet': pet.name})
+
                 elif event['type'] == 'buff_expired':
                     # Module 6: CC Immunity Clock
                     expired_buff = event['buff']
                     if expired_buff.type in [BuffType.STUN, BuffType.ROOT, BuffType.SLEEP]:
                         immunity_buff = Buff(type=BuffType.IMMUNITY, duration=4, magnitude=1.0, source_ability=0, stat_affected=expired_buff.type.value)
-                        self.buff_tracker.add_buff(enemy_pet, immunity_buff)
-                        self.log.add_event({'type': 'cc_immunity_applied', 'target': enemy_pet.name})
+                        self.buff_tracker.add_buff(pet, immunity_buff)
+                        self.log.add_event({'type': 'cc_immunity_applied', 'target': pet.name})
+
+        # --- 7. Final Death Check ---
+        self._check_deaths(player_pet, enemy_pet)
         
         # Tick weather duration
         if state.weather:
@@ -592,6 +740,25 @@ class BattleSimulator:
             if not still_active:
                 state.weather = None
                 self.log.add_event({'type': 'weather_ended'})
+
+    def _check_deaths(self, player_pet: Optional[Pet], enemy_pet: Optional[Pet]) -> bool:
+        """
+        Check if any active pet has died.
+        Returns True if a death occurred (which might end the turn processing for that pet).
+        """
+        death_occurred = False
+        for pet in [player_pet, enemy_pet]:
+            if pet and not pet.stats.is_alive():
+                # Check for Undead/Mechanical racials if not already triggered/handled
+                # Note: Racials are usually handled in take_damage or explicitly.
+                # Here we just log death if it hasn't been logged? 
+                # Actually, take_damage doesn't auto-log death in all cases.
+                
+                # Simple check: if HP <= 0 and not already marked dead in log?
+                # For now, just let the main loop handle the 'death' event if needed,
+                # but we return True so the caller knows someone is down.
+                death_occurred = True
+        return death_occurred
 
     def _check_condition(self, condition: str, attacker: Pet, defender: Pet, state: BattleState) -> bool:
         """Check if a bonus condition is met"""
