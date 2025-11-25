@@ -130,32 +130,11 @@ class BuffTracker:
                         'source': buff.source_ability
                     })
                     
-                    # Apply CC if applicable
+                    # Notify Simulator to apply CC (fixes dependency loop and aligning with simulator logic)
                     if "Geyser" in str(buff.source_ability):
-                        print("DEBUG: Applying Geyser Stun")
-                        stun_buff = Buff(
-                            type=BuffType.STUN,
-                            name="Stunned",
-                            duration=1,
-                            magnitude=0,
-                            source_ability="Geyser",
-                            stat_affected='none'
-                        )
-                        added = BuffTracker.add_buff(pet, stun_buff)
-                        print(f"DEBUG: Stun added? {added}")
-                        events.append({'type': 'cc_applied', 'cc': 'Stun', 'source': 'Geyser'})
-                        
+                         events.append({'type': 'delayed_stun', 'source': 'Geyser'})
                     elif "Whirlpool" in str(buff.source_ability):
-                        root_buff = Buff(
-                            type=BuffType.ROOT,
-                            name="Rooted",
-                            duration=2,
-                            magnitude=0,
-                            source_ability="Whirlpool",
-                            stat_affected='none'
-                        )
-                        BuffTracker.add_buff(pet, root_buff)
-                        events.append({'type': 'cc_applied', 'cc': 'Root', 'source': 'Whirlpool'})
+                         events.append({'type': 'delayed_root', 'source': 'Whirlpool'})
 
         # Remove expired buffs
         for buff in buffs_to_remove:

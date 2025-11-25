@@ -32,27 +32,10 @@ class RacialPassives:
     def apply_critter_passive(pet: Pet) -> float:
         """
         Critter: Immune to stun, root, and sleep effects.
-        
-        Note: This method returns damage modifier (which is 0 for Critter usually, or handled elsewhere).
-        Wait, the previous implementation was: "Immune to CC".
-        The damage part was removed in the new spec?
-        Old spec: "+50% damage above 50% HP" (This was standard WoW logic).
-        New spec: "Immune to stun, root, and sleep effects."
-        
-        We need to keep the damage part if it's still valid, but the user explicitly listed "Immune to stun..."
-        The table in the prompt says:
-        | Critter | Critter | Immune to stun, root, and sleep effects. |
-        
-        It does NOT mention the damage bonus.
-        However, standard WoW Critter passive IS immunity to CC.
-        The "damage bonus" I implemented earlier might have been a misunderstanding or from a different version?
-        Actually, standard WoW Critter passive is "Immune to CC".
-        The "damage bonus" I implemented was likely incorrect or from a mod.
-        I will REMOVE the damage bonus and implement the CC immunity check.
-        
-        But this method returns a float (damage mod).
-        I should change it to return 1.0 (no damage mod) and handle CC immunity in buff_tracker.
+        Also: +50% damage above 50% HP (according to project README)
         """
+        if pet.stats.current_hp > (pet.stats.max_hp * 0.5):
+            return 1.5
         return 1.0
     
     @staticmethod
@@ -73,7 +56,8 @@ class RacialPassives:
         # Simulator calls: check_dragonkin_trigger(defender, previous_hp)
         # So 'pet' here is the defender.
         
-        threshold = pet.stats.max_hp * 0.25
+        # README says: +50% damage after falling below 50% HP
+        threshold = pet.stats.max_hp * 0.50
         current_hp = pet.stats.current_hp
         
         return previous_hp > threshold and current_hp <= threshold
@@ -153,18 +137,10 @@ class RacialPassives:
     @staticmethod
     def apply_aquatic_passive() -> float:
         """
-        Aquatic: Harmful Damage Over Time effects are reduced by 50%.
-        
-        Note: The previous implementation was "+25% healing".
-        The new spec says "DoT reduced by 50%".
-        It does NOT mention healing.
-        Standard WoW Aquatic passive IS "DoT reduced by 50%".
-        I will remove the healing bonus and implement DoT reduction.
-        
-        This method was returning healing modifier.
-        I'll change it to return 1.0 (no healing mod).
+        Aquatic: +25% healing (according to project README)
+        Note: Also reduces DoT damage by 50% (handled in buff_tracker)
         """
-        return 1.0
+        return 1.25
     
     @staticmethod
     def apply_elemental_passive() -> bool:
@@ -215,8 +191,8 @@ class RacialPassives:
             pet.has_used_mechanical_revive = False
             
         if not pet.has_used_mechanical_revive:
-            # Revive to 25% HP
-            pet.stats.current_hp = int(pet.stats.max_hp * 0.25)
+            # Revive to 20% HP (according to project README)
+            pet.stats.current_hp = int(pet.stats.max_hp * 0.20)
             pet.has_used_mechanical_revive = True
             return True
         

@@ -104,16 +104,18 @@ class TestAbilityUpdates(unittest.TestCase):
         
         # Verify events
         damage_event = next((e for e in events if e['type'] == 'delayed_damage'), None)
-        cc_event = next((e for e in events if e.get('type') == 'cc_applied'), None)
+
+        # NOTE: delayed_stun is emitted instead of cc_applied to let Simulator handle it
+        stun_event = next((e for e in events if e.get('type') == 'delayed_stun'), None)
         
         self.assertIsNotNone(damage_event)
         self.assertEqual(damage_event['amount'], 100)
         
-        self.assertIsNotNone(cc_event)
-        self.assertEqual(cc_event['cc'], 'Stun')
+        self.assertIsNotNone(stun_event)
+        self.assertEqual(stun_event['source'], 'Geyser')
         
-        # Verify Stun buff applied
-        self.assertTrue(any(b.type == BuffType.STUN for b in self.pet.active_buffs))
+        # NOTE: Stun buff is NOT applied by BuffTracker anymore, it's applied by Simulator.
+        # So we don't check for STUN buff here.
 
 if __name__ == '__main__':
     unittest.main()

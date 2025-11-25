@@ -30,27 +30,22 @@ def create_pet(name: str, family: PetFamily, hp: int = 1000, power: int = 200, s
 
 
 def test_dragonkin_passive_new_threshold():
-    """Dragonkin: Trigger at 25% HP (New Spec)"""
+    """Dragonkin: Trigger at 50% HP (Updated Spec)"""
     dragonkin = create_pet("Dragonkin", PetFamily.DRAGONKIN, hp=1000)
     
-    # Fall to 300 (30%) - Should NOT trigger
-    triggered = RacialPassives.check_dragonkin_trigger(dragonkin, previous_hp=400)
+    # Fall from 600 (60%) to 400 (40%) - Should TRIGGER
+    dragonkin.stats.current_hp = 400
+    triggered = RacialPassives.check_dragonkin_trigger(dragonkin, previous_hp=600)
+    assert triggered == True, "Should TRIGGER when falling below 50%"
+
+    # Fall from 400 (40%) to 300 (30%) - Should NOT trigger (already below)
     dragonkin.stats.current_hp = 300
-    # Wait, check_dragonkin_trigger checks current_hp vs threshold.
-    # We need to set current_hp BEFORE calling it?
-    # No, the function takes 'pet' and uses its current_hp.
-    # So we set hp to 300, then call.
     triggered = RacialPassives.check_dragonkin_trigger(dragonkin, previous_hp=400)
-    assert triggered == False, "Should NOT trigger at 30% HP"
-    
-    # Fall to 200 (20%) - Should TRIGGER
-    dragonkin.stats.current_hp = 200
-    triggered = RacialPassives.check_dragonkin_trigger(dragonkin, previous_hp=300)
-    assert triggered == True, "Should TRIGGER at 20% HP"
+    assert triggered == False, "Should NOT trigger if already below 50%"
 
 
 def test_mechanical_passive_new_revive():
-    """Mechanical: Revive to 25% HP (New Spec)"""
+    """Mechanical: Revive to 20% HP (Updated Spec)"""
     mech = create_pet("Mech", PetFamily.MECHANICAL, hp=1000)
     mech.stats.current_hp = 0
     
@@ -59,7 +54,7 @@ def test_mechanical_passive_new_revive():
     revived = RacialPassives.apply_mechanical_passive(mech)
     print(f"DEBUG: revived: {revived}, has_used_mechanical_revive after: {mech.has_used_mechanical_revive}")
     assert revived == True, "Should revive"
-    assert mech.stats.current_hp == 250, "Should revive to 250 HP (25% of 1000)"
+    assert mech.stats.current_hp == 200, "Should revive to 200 HP (20% of 1000)"
     
     # Second revive should fail
     mech.stats.current_hp = 0
@@ -158,7 +153,8 @@ def test_delayed_geyser():
     pet = create_pet("Pet", PetFamily.ELEMENTAL)
     
     # Add Delayed Effect (Geyser)
-    geyser = Buff(type=BuffType.DELAYED_EFFECT, duration=1, magnitude=0, source_ability=999) # 1 turn remaining
+    # Note: source_ability must contain "Geyser" for trigger logic
+    geyser = Buff(type=BuffType.DELAYED_EFFECT, duration=1, magnitude=0, source_ability="Geyser") # 1 turn remaining
     sim.buff_tracker.add_buff(pet, geyser)
     
     # Tick buffs (simulate end of turn)

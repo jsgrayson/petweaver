@@ -51,9 +51,10 @@ class TestSmartAgent(unittest.TestCase):
         # Set HP to 290 so Weak fails but Kill succeeds.
         self.enemy1.stats.current_hp = 290
         
-        # Agent has Kill Shot (100 dmg) and Weak Shot (10 dmg)
+        # Agent has Kill Shot (100 dmg) and Weak Shot (5 dmg)
+        # Reduced Weak shot to 5 to avoid RNG variance (Beast passive + variance could make 10 dmg kill 290)
         kill_shot = Ability(1, "Kill", 100, 100, 0, 0, PetFamily.BEAST)
-        weak_shot = Ability(2, "Weak", 10, 100, 0, 0, PetFamily.BEAST)
+        weak_shot = Ability(2, "Weak", 5, 100, 0, 0, PetFamily.BEAST)
         self.pet1.abilities = [weak_shot, kill_shot]
         
         action = self.agent.decide(self.state)

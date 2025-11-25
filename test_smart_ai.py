@@ -16,9 +16,10 @@ from genetic.agents import SmartEnemyAgent
 from genetic.genome import TeamGenome
 from genetic.fitness import FitnessEvaluator
 
-# Load Squirt encounter
+# Load encounter (Farmer Nishi)
+# Note: Switched from 'squirt' to 'farmer-nishi' because 'squirt' data is missing from encounters.json
 with open('encounters.json') as f:
-    encounter_data = json.load(f)['squirt']
+    encounter_data = json.load(f)['farmer-nishi']
 
 # Build target team from encounters.json
 def build_target_team():
