@@ -31,35 +31,52 @@ class RacialPassives:
     @staticmethod
     def apply_critter_passive(pet: Pet) -> float:
         """
-        Critter: +50% damage dealt when above 50% HP
+        Critter: Immune to stun, root, and sleep effects.
         
-        Args:
-            pet: The critter pet to check
-            
-        Returns:
-            Damage multiplier (1.5 if above 50% HP, 1.0 otherwise)
+        Note: This method returns damage modifier (which is 0 for Critter usually, or handled elsewhere).
+        Wait, the previous implementation was: "Immune to CC".
+        The damage part was removed in the new spec?
+        Old spec: "+50% damage above 50% HP" (This was standard WoW logic).
+        New spec: "Immune to stun, root, and sleep effects."
+        
+        We need to keep the damage part if it's still valid, but the user explicitly listed "Immune to stun..."
+        The table in the prompt says:
+        | Critter | Critter | Immune to stun, root, and sleep effects. |
+        
+        It does NOT mention the damage bonus.
+        However, standard WoW Critter passive IS immunity to CC.
+        The "damage bonus" I implemented earlier might have been a misunderstanding or from a different version?
+        Actually, standard WoW Critter passive is "Immune to CC".
+        The "damage bonus" I implemented was likely incorrect or from a mod.
+        I will REMOVE the damage bonus and implement the CC immunity check.
+        
+        But this method returns a float (damage mod).
+        I should change it to return 1.0 (no damage mod) and handle CC immunity in buff_tracker.
         """
-        if pet.stats.current_hp > (pet.stats.max_hp * 0.5):
-            return 1.5
         return 1.0
     
     @staticmethod
     def check_dragonkin_trigger(pet: Pet, previous_hp: int) -> bool:
         """
-        Check if Dragonkin passive should trigger
-        
-        Dragonkin: +50% damage on next attack after falling below 50% HP
+        Dragonkin: Deals 50% extra damage the round after reducing an enemy below 25% health.
         
         Args:
-            pet: The dragonkin pet
-            previous_hp: HP before damage was taken
+            pet: The Dragonkin pet (attacker)
+            previous_hp: The defender's HP before the attack
             
-        Returns:
-            True if pet just fell below 50% HP threshold
+        Note: This is checked AFTER damage is dealt. We need to know if the target FELL below 25%.
+        But wait, the spec says "reducing an enemy below 25%".
+        So we check if previous_hp > 25% max and current_hp <= 25% max.
         """
-        hp_threshold = pet.stats.max_hp * 0.5
-        fell_below = previous_hp > hp_threshold and pet.stats.current_hp <= hp_threshold
-        return fell_below
+        # This method is called with the DEFENDER as 'pet' in simulator.py currently?
+        # Let's check simulator.py usage.
+        # Simulator calls: check_dragonkin_trigger(defender, previous_hp)
+        # So 'pet' here is the defender.
+        
+        threshold = pet.stats.max_hp * 0.25
+        current_hp = pet.stats.current_hp
+        
+        return previous_hp > threshold and current_hp <= threshold
     
     @staticmethod
     def apply_dragonkin_passive(pet: Pet) -> float:
@@ -136,12 +153,18 @@ class RacialPassives:
     @staticmethod
     def apply_aquatic_passive() -> float:
         """
-        Aquatic: +25% healing received/dealt
+        Aquatic: Harmful Damage Over Time effects are reduced by 50%.
         
-        Returns:
-            Healing multiplier (1.25)
+        Note: The previous implementation was "+25% healing".
+        The new spec says "DoT reduced by 50%".
+        It does NOT mention healing.
+        Standard WoW Aquatic passive IS "DoT reduced by 50%".
+        I will remove the healing bonus and implement DoT reduction.
+        
+        This method was returning healing modifier.
+        I'll change it to return 1.0 (no healing mod).
         """
-        return 1.25
+        return 1.0
     
     @staticmethod
     def apply_elemental_passive() -> bool:
@@ -183,21 +206,17 @@ class RacialPassives:
     @staticmethod
     def apply_mechanical_passive(pet: Pet) -> bool:
         """
-        Mechanical: Revive once per battle to 20% HP when killed
+        Mechanical: Comes back to life once per battle, returning to 25% health.
         
-        Args:
-            pet: The mechanical pet that just died
-            
         Returns:
-            True if pet revived, False otherwise
+            True if revived, False otherwise
         """
-        # Check if this pet has already used its revive
         if not hasattr(pet, 'has_used_mechanical_revive'):
             pet.has_used_mechanical_revive = False
-        
+            
         if not pet.has_used_mechanical_revive:
-            # Revive to 20% HP
-            pet.stats.current_hp = int(pet.stats.max_hp * 0.2)
+            # Revive to 25% HP
+            pet.stats.current_hp = int(pet.stats.max_hp * 0.25)
             pet.has_used_mechanical_revive = True
             return True
         

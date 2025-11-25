@@ -684,7 +684,7 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
                     'family_name': info.get('family_name', 'Beast')
                 }
         
-        evaluator = FitnessEvaluator(target_team, formatted_ability_db, species_db, npc_priorities)
+        evaluator = FitnessEvaluator(target_team, formatted_ability_db, species_db, npc_priorities, target_name=target_name)
         # Monkey patch the ability lookup and pet stats (hack for MVP)
         evaluator.real_abilities = real_abilities
         evaluator.real_pet_stats = real_pet_stats

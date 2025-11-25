@@ -11,6 +11,7 @@ Implements WoW pet battle damage formulas including:
 
 from typing import Optional, Tuple
 import random
+import math
 from .battle_state import Pet, Ability, PetFamily, PetQuality, Buff, BuffType
 from .racial_passives import RacialPassives
 
@@ -19,43 +20,43 @@ from .racial_passives import RacialPassives
 FAMILY_EFFECTIVENESS = {
     PetFamily.HUMANOID: {
         PetFamily.DRAGONKIN: 1.5,  # Strong vs Dragonkin
-        PetFamily.BEAST: 0.666,     # Weak vs Beast
+        PetFamily.BEAST: 0.67,     # Weak vs Beast
     },
     PetFamily.DRAGONKIN: {
         PetFamily.MAGIC: 1.5,
-        PetFamily.UNDEAD: 0.666,
+        PetFamily.UNDEAD: 0.67,
     },
     PetFamily.FLYING: {
         PetFamily.AQUATIC: 1.5,
-        PetFamily.DRAGONKIN: 0.666,
+        PetFamily.DRAGONKIN: 0.67,
     },
     PetFamily.UNDEAD: {
         PetFamily.HUMANOID: 1.5,
-        PetFamily.CRITTER: 0.666,
+        PetFamily.CRITTER: 0.67,
     },
     PetFamily.CRITTER: {
         PetFamily.UNDEAD: 1.5,
-        PetFamily.HUMANOID: 0.666,
+        PetFamily.HUMANOID: 0.67,
     },
     PetFamily.MAGIC: {
         PetFamily.FLYING: 1.5,
-        PetFamily.MECHANICAL: 0.666,
+        PetFamily.MECHANICAL: 0.67,
     },
     PetFamily.ELEMENTAL: {
         PetFamily.MECHANICAL: 1.5,
-        PetFamily.CRITTER: 0.666,
+        PetFamily.CRITTER: 0.67,
     },
     PetFamily.BEAST: {
         PetFamily.CRITTER: 1.5,
-        PetFamily.FLYING: 0.666,
+        PetFamily.FLYING: 0.67,
     },
     PetFamily.AQUATIC: {
         PetFamily.ELEMENTAL: 1.5,
-        PetFamily.MAGIC: 0.666,
+        PetFamily.MAGIC: 0.67,
     },
     PetFamily.MECHANICAL: {
         PetFamily.BEAST: 1.5,
-        PetFamily.ELEMENTAL: 0.666,
+        PetFamily.ELEMENTAL: 0.67,
     },
 }
 
@@ -240,8 +241,20 @@ class DamageCalculator:
         damage_reduction = 1.0
         for buff in defender.active_buffs:
             if buff.type == BuffType.STAT_MOD and buff.stat_affected == 'damage_taken':
+                # Howl (2.0) and Shell Shield (0.5) are handled here multiplicatively
                 damage_reduction *= buff.magnitude
         
+        # Check for Decoy/Block
+        blocked = False
+        for buff in defender.active_buffs:
+            if buff.type == BuffType.BLOCK:
+                blocked = True
+                buff.stacks -= 1
+                if buff.stacks <= 0:
+                    defender.active_buffs.remove(buff)
+                details['blocked'] = True
+                return 0, details
+
         final_damage = int(final_damage * damage_reduction)
         
         # Apply Magic racial passive (damage cap at 35% max HP)
@@ -250,6 +263,9 @@ class DamageCalculator:
         
         # Minimum 1 damage if hit
         final_damage = max(1, final_damage)
+        # Final rounding (Module 6: Round DOWN)
+        final_damage = math.floor(final_damage)
+        
         details['final_damage'] = final_damage
         
         return final_damage, details

@@ -6,14 +6,14 @@ Handles duration tracking, stacking, and tick processing.
 """
 
 from typing import List, Dict, Optional
-from .battle_state import Pet, Buff, BuffType
+from .battle_state import Pet, Buff, BuffType, PetFamily
 
 
 class BuffTracker:
     """Tracks and processes all active buffs/debuffs in battle"""
     
     @staticmethod
-    def add_buff(pet: Pet, buff: Buff) -> bool:
+    def add_buff(pet: Pet, buff: Buff, weather: Optional[Buff] = None) -> bool:
         """
         Add a buff to a pet
         
@@ -36,6 +36,23 @@ class BuffTracker:
                     existing_buff.duration = buff.duration
                     return False
         
+        # Critter Immunity Check (Stun, Root, Sleep)
+        if pet.family == PetFamily.CRITTER:
+            if buff.type in [BuffType.STUN, BuffType.ROOT, BuffType.SLEEP]:
+                return False
+        
+        # CC Immunity Clock Check (Module 6)
+        if buff.type in [BuffType.STUN, BuffType.ROOT, BuffType.SLEEP]:
+            for active_buff in pet.active_buffs:
+                if active_buff.type == BuffType.IMMUNITY and active_buff.stat_affected == buff.type.value:
+                    return False
+        
+        # Cleansing Rain Logic: Reduces DoT duration by 1 round
+        if buff.type == BuffType.DOT and weather and weather.name == "Cleansing Rain":
+            buff.duration = max(0, buff.duration - 1)
+            if buff.duration == 0:
+                return False # Prevent adding if duration becomes 0
+
         # New buff, add it
         pet.active_buffs.append(buff)
         return True
@@ -52,27 +69,31 @@ class BuffTracker:
         pet.active_buffs = [b for b in pet.active_buffs if b.type != buff_type]
     
     @staticmethod
-    def tick_all_buffs(pet: Pet) -> List[Dict]:
-        """
-        Process end-of-turn effects for all buffs
-        
-        Returns list of events (damage, healing, expiration)
-        """
+    def process_dots(pet: Pet) -> List[Dict]:
+        """Process Damage Over Time effects"""
         events = []
-        buffs_to_remove = []
-        
         for buff in pet.active_buffs:
-            # Process buff effect (DoT/HoT)
             if buff.type == BuffType.DOT:
                 damage = int(buff.magnitude * buff.stacks)
+                
+                # Aquatic Passive: Reduces DoT damage by 50%
+                if str(pet.family) == 'PetFamily.AQUATIC' or getattr(pet.family, 'name', '') == 'AQUATIC':
+                     damage = int(damage * 0.5)
+                
                 actual_damage = pet.stats.take_damage(damage)
                 events.append({
                     'type': 'dot_damage',
                     'amount': actual_damage,
                     'source': buff.source_ability
                 })
-            
-            elif buff.type == BuffType.HOT:
+        return events
+
+    @staticmethod
+    def process_hots(pet: Pet) -> List[Dict]:
+        """Process Healing Over Time effects"""
+        events = []
+        for buff in pet.active_buffs:
+            if buff.type == BuffType.HOT:
                 heal = int(buff.magnitude * buff.stacks)
                 actual_heal = pet.stats.heal(heal)
                 events.append({
@@ -80,8 +101,15 @@ class BuffTracker:
                     'amount': actual_heal,
                     'source': buff.source_ability
                 })
-            
-            # Tick duration
+        return events
+
+    @staticmethod
+    def decrement_durations(pet: Pet) -> List[Dict]:
+        """Decrement buff durations and handle expiration"""
+        events = []
+        buffs_to_remove = []
+        
+        for buff in list(pet.active_buffs):
             still_active = buff.tick()
             if not still_active:
                 buffs_to_remove.append(buff)
@@ -89,13 +117,61 @@ class BuffTracker:
                     'type': 'buff_expired',
                     'buff': buff
                 })
-        
+                
+                # Trigger Delayed Effects (Geyser/Whirlpool) on expiration
+                if buff.type == BuffType.DELAYED_EFFECT:
+                    print(f"DEBUG: Triggering delayed effect for {buff.source_ability}")
+                    # Deal Damage
+                    damage = int(buff.magnitude)
+                    actual_damage = pet.stats.take_damage(damage)
+                    events.append({
+                        'type': 'delayed_damage',
+                        'amount': actual_damage,
+                        'source': buff.source_ability
+                    })
+                    
+                    # Apply CC if applicable
+                    if "Geyser" in str(buff.source_ability):
+                        print("DEBUG: Applying Geyser Stun")
+                        stun_buff = Buff(
+                            type=BuffType.STUN,
+                            name="Stunned",
+                            duration=1,
+                            magnitude=0,
+                            source_ability="Geyser",
+                            stat_affected='none'
+                        )
+                        added = BuffTracker.add_buff(pet, stun_buff)
+                        print(f"DEBUG: Stun added? {added}")
+                        events.append({'type': 'cc_applied', 'cc': 'Stun', 'source': 'Geyser'})
+                        
+                    elif "Whirlpool" in str(buff.source_ability):
+                        root_buff = Buff(
+                            type=BuffType.ROOT,
+                            name="Rooted",
+                            duration=2,
+                            magnitude=0,
+                            source_ability="Whirlpool",
+                            stat_affected='none'
+                        )
+                        BuffTracker.add_buff(pet, root_buff)
+                        events.append({'type': 'cc_applied', 'cc': 'Root', 'source': 'Whirlpool'})
+
         # Remove expired buffs
         for buff in buffs_to_remove:
             pet.active_buffs.remove(buff)
-        
+            
         return events
     
+    @staticmethod
+    def tick_all_buffs(pet: Pet) -> List[Dict]:
+        """Legacy wrapper for backward compatibility. Executes cleanup phase in order: DoTs, HoTs, then decrement durations."""
+        events: List[Dict] = []
+        events.extend(BuffTracker.process_dots(pet))
+        events.extend(BuffTracker.process_hots(pet))
+        events.extend(BuffTracker.decrement_durations(pet))
+        return events
+
     @staticmethod
     def apply_weather_effect(pet: Pet, weather_buff: Optional[Buff]) -> List[Dict]:
         """
@@ -139,6 +215,12 @@ class BuffTracker:
                 'hit_chance_bonus': -0.10,  # -10% accuracy (standard Darkness)
                 'dot_damage': 0,  # Call Darkness doesn't do persistent DoT (just initial hit)
             },
+            'cleansing_rain': {
+                'damage_bonus_family': 'Aquatic', # +25% Aquatic damage
+                'damage_bonus': 0.25,
+                'dot_duration_reduction': 1, # Reduces DoT duration by 1 round
+                'dot_damage': 0,
+            }
         }
         
         # Apply effects (simplified - would need full implementation)
@@ -184,6 +266,15 @@ class BuffTracker:
         buffs_to_remove = []
         
         for buff in pet.active_buffs:
+            # Decoy / Block Logic (Blocks next 1 instance)
+            if buff.type == BuffType.BLOCK:
+                # Blocks 1 instance completely
+                remaining_damage = 0
+                buff.stacks -= 1
+                if buff.stacks <= 0:
+                    buffs_to_remove.append(buff)
+                break  # Stop processing other shields if blocked completely
+                
             if buff.type == BuffType.SHIELD and remaining_damage > 0:
                 shield_amount = int(buff.magnitude)
                 

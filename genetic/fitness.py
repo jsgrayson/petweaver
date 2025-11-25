@@ -3,11 +3,12 @@ from simulator import BattleSimulator, BattleState, Team, Pet, Ability, TurnActi
 from .genome import TeamGenome
 
 class FitnessEvaluator:
-    def __init__(self, target_team: Team, ability_db: Dict, species_db: Dict, npc_priorities: Dict = None):
+    def __init__(self, target_team: Team, ability_db: Dict, species_db: Dict, npc_priorities: Dict = None, target_name: str = "Unknown"):
         self.target_team = target_team
         self.ability_db = ability_db
         self.species_db = species_db
         self.npc_priorities = npc_priorities or {}
+        self.target_name = target_name
         self.simulator = BattleSimulator(rng_seed=None) # Random seed for variety
 
     def evaluate(self, genome: TeamGenome, num_battles: int = 5) -> float:
@@ -64,11 +65,14 @@ class FitnessEvaluator:
 
         # Enemy Agent - Use SmartEnemyAgent for consistent behavior
         from .agents import create_smart_enemy_agent
+        from simulator.npc_ai import create_npc_agent
+        
         # Pass priorities if available
         # Note: npc_priorities is Dict[int, List[int]] mapping pet_idx -> ability_ids
         # We need to ensure keys are integers
         priorities = {int(k): v for k, v in self.npc_priorities.items()} if self.npc_priorities else None
-        enemy_agent = create_smart_enemy_agent(difficulty=1.0, ability_priorities=priorities)
+        base_agent = create_smart_enemy_agent(difficulty=1.0, ability_priorities=priorities)
+        enemy_agent = create_npc_agent(self.target_name, base_agent)
 
         # Run Battles
         wins = 0

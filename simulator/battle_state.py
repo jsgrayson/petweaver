@@ -6,7 +6,7 @@ at any point in time. It provides immutable state snapshots for simulation.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Union
 from enum import Enum
 import copy
 
@@ -45,6 +45,10 @@ class BuffType(Enum):
     WEATHER = "weather"
     AURA = "aura"
     IMMUNITY = "immunity"
+    BLOCK = "block"
+    ROOT = "root"
+    SLEEP = "sleep"
+    DELAYED_EFFECT = "delayed_effect"
 
 
 @dataclass
@@ -94,6 +98,7 @@ class Ability:
     # Complex effects
     bonus_damage_percent: float = 0.0  # e.g. 0.5 for +50%
     bonus_condition: Optional[str] = None  # e.g. 'weather_sunny', 'target_webbed'
+    delayed_turns: int = 0  # e.g. 3 for Geyser/Whirlpool
     effect_type: Optional[str] = None  # e.g. 'stun', 'swap', 'heal_team'
     effect_chance: int = 100  # Percent chance for effect
     
@@ -107,8 +112,9 @@ class Buff:
     type: BuffType
     duration: int  # Rounds remaining
     magnitude: float  # Multiplier or flat amount
+    name: str = "Unknown"
     stat_affected: Optional[str] = None  # 'power', 'speed', 'damage_taken'
-    source_ability: Optional[int] = None  # Ability ID that applied this
+    source_ability: Optional[Union[int, str]] = None  # Ability ID or Name that applied this
     stacks: int = 1  # Some buffs stack
     
     def tick(self) -> bool:

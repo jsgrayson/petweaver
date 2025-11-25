@@ -159,6 +159,27 @@ class BattleSimulator:
                     if SpecialEncounterHandler.has_special_mechanic(pet) == 'gore_stacks':
                         SpecialEncounterHandler.apply_gorespine_gore(pet, turn_number)
         
+        # Module 6: Turn Order Update
+        # 1. Damage Over Time (DoT) Tick
+        # 2. Weather Effect Damage
+        # 3. Pet Status Check (Revives)
+        # 4. Choose Abilities (Already done outside)
+        # 5. Execute Abilities
+        
+        # Process DoTs/HoTs/Weather at START of turn
+        self.process_end_of_turn(new_state, player_pet, enemy_pet)
+        
+        # Check if anyone died from DoTs
+        if new_state.is_battle_over():
+            return new_state
+            
+        # Re-fetch active pets in case of death/swap (though swap shouldn't happen here)
+        player_pet = new_state.player_team.get_active_pet()
+        enemy_pet = new_state.enemy_team.get_active_pet()
+        
+        if not player_pet or not enemy_pet:
+            return new_state
+        
         # Determine action order
         action_order = self.turn_system.determine_turn_order(
             player_pet, player_action,
@@ -190,8 +211,12 @@ class BattleSimulator:
             if new_state.is_battle_over():
                 break
         
-        # End of turn: process DoTs/HoTs and tick buffs
-        self.process_end_of_turn(new_state, player_pet, enemy_pet)
+        # End of turn processing MOVED to start of turn (Module 6)
+        # But we still need to tick cooldowns at end of turn?
+        # The prompt says: "1. DoT... 5. Execute Abilities".
+        # It doesn't explicitly say where cooldowns tick.
+        # Standard WoW: Cooldowns tick at end of round.
+        # We will keep cooldown ticking here.
         
         # Tick cooldowns
         if player_pet:
@@ -267,6 +292,28 @@ class BattleSimulator:
                 })
             else:
                 # Damage ability
+                
+                # Check for Delayed Effect (Geyser/Whirlpool)
+                # Assuming Ability has 'delayed_turns' attribute (will add next)
+                if getattr(ability, 'delayed_turns', 0) > 0:
+                    # Apply Delayed Effect Buff
+                    buff = Buff(
+                        type=BuffType.DELAYED_EFFECT,
+                        name=f"Delayed: {ability.name}",
+                        duration=ability.delayed_turns,
+                        magnitude=ability.power, # Store power for later
+                        source_ability=ability.name,
+                        stat_affected='none'
+                    )
+                    self.buff_tracker.add_buff(defender, buff, state.weather)
+                    self.log.add_event({
+                        'type': 'buff_applied',
+                        'buff': buff.name,
+                        'target': defender.name,
+                        'duration': buff.duration
+                    })
+                    return # Skip immediate damage
+
                 # Check for bonus damage condition
                 bonus_mult = 1.0
                 if ability.bonus_condition:
@@ -280,6 +327,25 @@ class BattleSimulator:
                 damage, details = self.damage_calc.calculate_damage(
                     ability, attacker, defender, state.weather
                 )
+                
+                # Module 6: Level-Based Miss Chance
+                # 5% miss chance if Target Level > Attacker Level
+                # Assuming default level 25 for now if not set
+                attacker_level = getattr(attacker, 'level', 25)
+                defender_level = getattr(defender, 'level', 25)
+                
+                if defender_level > attacker_level:
+                    import random
+                    if random.random() < 0.05:
+                        damage = 0
+                        details['hit'] = False
+                        details['final_damage'] = 0
+                        self.log.add_event({
+                            'type': 'miss',
+                            'actor': action.actor,
+                            'ability': ability.name,
+                            'reason': 'level_difference'
+                        })
                 
                 # Apply bonus multiplier
                 damage = int(damage * bonus_mult)
@@ -466,16 +532,59 @@ class BattleSimulator:
                                 'pet': pet.name,
                                 'damage': actual_damage
                             })
-        
-        if player_pet:
+        # Process buff ticks
+        if player_pet and player_pet.stats.is_alive():
             events = self.buff_tracker.tick_all_buffs(player_pet)
             for event in events:
-                self.log.add_event({**event, 'target': 'player'})
-        
-        if enemy_pet:
+                self.log.add_event(event)
+                # Handle delayed effects
+                if event['type'] == 'delayed_stun':
+                    # Apply Stun
+                    stun_buff = Buff(type=BuffType.STUN, duration=1, magnitude=1.0, source_ability=999)
+                    self.buff_tracker.add_buff(player_pet, stun_buff)
+                    self.log.add_event({'type': 'stun_applied', 'target': player_pet.name, 'source': 'Geyser'})
+                elif event['type'] == 'delayed_root':
+                    # Apply Root
+                    root_buff = Buff(type=BuffType.ROOT, duration=2, magnitude=1.0, source_ability=998)
+                    self.buff_tracker.add_buff(player_pet, root_buff)
+                    self.log.add_event({'type': 'root_applied', 'target': player_pet.name, 'source': 'Whirlpool'})
+                elif event['type'] == 'buff_expired':
+                    # Module 6: CC Immunity Clock
+                    # If Stun/Root/Sleep expired, add 4-round immunity
+                    expired_buff = event['buff']
+                    if expired_buff.type in [BuffType.STUN, BuffType.ROOT, BuffType.SLEEP]:
+                        immunity_buff = Buff(type=BuffType.IMMUNITY, duration=4, magnitude=1.0, source_ability=0, stat_affected=expired_buff.type.value)
+                        # Note: We need to handle specific immunity type in buff_tracker or just use generic IMMUNITY type?
+                        # BuffType.IMMUNITY usually means "Immune to Damage".
+                        # We need "Immune to CC".
+                        # Let's use a custom stat_affected for CC immunity.
+                        # Actually, let's use a new BuffType or just handle it in add_buff.
+                        # We'll use BuffType.IMMUNITY but with stat_affected='cc_immunity' or specific type.
+                        # Let's use 'cc_immunity' for now and update add_buff to check it.
+                        # Actually, let's just use the specific type name as stat_affected.
+                        self.buff_tracker.add_buff(player_pet, immunity_buff)
+                        self.log.add_event({'type': 'cc_immunity_applied', 'target': player_pet.name})
+
+        if enemy_pet and enemy_pet.stats.is_alive():
             events = self.buff_tracker.tick_all_buffs(enemy_pet)
             for event in events:
-                self.log.add_event({**event, 'target': 'enemy'})
+                self.log.add_event(event)
+                # Handle delayed effects
+                if event['type'] == 'delayed_stun':
+                    stun_buff = Buff(type=BuffType.STUN, duration=1, magnitude=1.0, source_ability=999)
+                    self.buff_tracker.add_buff(enemy_pet, stun_buff)
+                    self.log.add_event({'type': 'stun_applied', 'target': enemy_pet.name, 'source': 'Geyser'})
+                elif event['type'] == 'delayed_root':
+                    root_buff = Buff(type=BuffType.ROOT, duration=2, magnitude=1.0, source_ability=998)
+                    self.buff_tracker.add_buff(enemy_pet, root_buff)
+                    self.log.add_event({'type': 'root_applied', 'target': enemy_pet.name, 'source': 'Whirlpool'})
+                elif event['type'] == 'buff_expired':
+                    # Module 6: CC Immunity Clock
+                    expired_buff = event['buff']
+                    if expired_buff.type in [BuffType.STUN, BuffType.ROOT, BuffType.SLEEP]:
+                        immunity_buff = Buff(type=BuffType.IMMUNITY, duration=4, magnitude=1.0, source_ability=0, stat_affected=expired_buff.type.value)
+                        self.buff_tracker.add_buff(enemy_pet, immunity_buff)
+                        self.log.add_event({'type': 'cc_immunity_applied', 'target': enemy_pet.name})
         
         # Tick weather duration
         if state.weather:
@@ -501,15 +610,33 @@ class BattleSimulator:
     def _apply_effect(self, effect_type: str, attacker: Pet, defender: Pet, state: BattleState):
         """Apply a secondary effect"""
         if effect_type == 'stun':
-            # Apply stun buff
+            # Check Critter Immunity
+            if defender.family == PetFamily.CRITTER:
+                self.log.add_event({'type': 'immune', 'target': defender.name, 'effect': 'stun'})
+                return
+
             buff = Buff(
                 type=BuffType.STUN,
                 duration=1,
-                magnitude=0,
+                magnitude=1.0,
                 source_ability=0
             )
             self.buff_tracker.add_buff(defender, buff)
             self.log.add_event({'type': 'stun_applied', 'target': defender.name})
+        elif effect_type == 'dot':
+            # Check Cleansing Rain (reduces DoT duration by 1)
+            duration = 3 # Default
+            if state.weather and state.weather.stat_affected == 'cleansing_rain':
+                duration -= 1
+            
+            if duration > 0:
+                buff = Buff(
+                    type=BuffType.DOT,
+                    duration=duration,
+                    magnitude=10, # Placeholder
+                    source_ability=0
+                )
+                self.buff_tracker.add_buff(defender, buff)
         elif effect_type == 'swap':
             # Force swap (simplified, just logs for now)
             self.log.add_event({'type': 'force_swap', 'target': defender.name})
