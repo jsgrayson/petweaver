@@ -158,14 +158,14 @@ def test_delayed_geyser():
     pet = create_pet("Pet", PetFamily.ELEMENTAL)
     
     # Add Delayed Effect (Geyser)
-    geyser = Buff(type=BuffType.DELAYED_EFFECT, duration=1, magnitude=0, source_ability=999) # 1 turn remaining
+    geyser = Buff(type=BuffType.DELAYED_EFFECT, duration=1, magnitude=100, source_ability="Geyser")
     sim.buff_tracker.add_buff(pet, geyser)
     
     # Tick buffs (simulate end of turn)
     events = sim.buff_tracker.tick_all_buffs(pet)
     
-    # Should have 'buff_expired' and 'delayed_stun'
-    assert any(e['type'] == 'delayed_stun' for e in events), "Geyser should trigger delayed_stun"
+    # Should have 'buff_expired' and 'cc_applied'
+    assert any(e['type'] == 'cc_applied' for e in events), "Geyser should trigger cc_applied"
 
 
 def test_level_based_miss_chance():

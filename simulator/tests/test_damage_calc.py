@@ -95,8 +95,8 @@ class TestDamageCalculator:
         calc = DamageCalculator(rng_seed=42)
         damage, details = calc.calculate_damage(basic_ability, beast_poor, critter)
         
-        # Poor quality = 0.8x damage
-        assert details['quality_multiplier'] == 0.8
+        # Quality is applied in power stat, not in damage calculation
+        assert details['quality_multiplier'] == 1.0
     
     def test_miss(self):
         """Test ability missing"""

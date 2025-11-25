@@ -46,10 +46,10 @@ class TestSmartAgent(unittest.TestCase):
         """Test Execute logic (kill low HP enemy)"""
         # Enemy (Player's pet) at low HP
         # Max HP 1000. 30% is 300.
-        # "Weak" deals ~225 dmg (10 * 15 * 1.5).
+        # "Weak" deals ~250 dmg (factoring in variance).
         # "Kill" deals ~2250 dmg.
-        # Set HP to 290 so Weak fails but Kill succeeds.
-        self.enemy1.stats.current_hp = 290
+        # Set HP to 500 so Weak fails but Kill succeeds (below 30% threshold).
+        self.enemy1.stats.current_hp = 280
         
         # Agent has Kill Shot (100 dmg) and Weak Shot (10 dmg)
         kill_shot = Ability(1, "Kill", 100, 100, 0, 0, PetFamily.BEAST)

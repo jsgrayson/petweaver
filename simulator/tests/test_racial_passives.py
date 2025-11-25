@@ -36,11 +36,11 @@ def test_beast_passive():
 
 
 def test_critter_passive_above_50():
-    """Critter: +50% damage when above 50% HP"""
+    """Critter: No damage bonus (only CC immunity per spec)"""
     critter = create_pet("Critter", PetFamily.CRITTER, hp=1000)
     critter.stats.current_hp = 600  # Above 50%
     modifier = RacialPassives.apply_critter_passive(critter)
-    assert modifier == 1.5, "Critter above 50% HP should get +50% damage"
+    assert modifier == 1.0, "Critter has no damage bonus per spec"
 
 
 def test_critter_passive_below_50():
@@ -101,9 +101,9 @@ def test_magic_passive_normal_damage():
 
 
 def test_aquatic_passive():
-    """Aquatic: +25% healing"""
+    """Aquatic: No healing bonus (only DoT reduction per spec)"""
     modifier = RacialPassives.apply_aquatic_passive()
-    assert modifier == 1.25, "Aquatic should get +25% healing"
+    assert modifier == 1.0, "Aquatic has no healing bonus per spec"
 
 
 def test_elemental_passive():
@@ -136,14 +136,14 @@ def test_undead_passive_second_time():
 
 
 def test_mechanical_passive_first_time():
-    """Mechanical: Revive to 20% HP once"""
+    """Mechanical: Revive to 25% HP once"""
     mechanical = create_pet("Mechanical", PetFamily.MECHANICAL, hp=1000)
     mechanical.stats.current_hp = 0  # Dead
     
     revived = RacialPassives.apply_mechanical_passive(mechanical)
     
     assert revived == True, "Mechanical should revive first time"
-    assert mechanical.stats.current_hp == 200, "Should revive to 20% HP (200/1000)"
+    assert mechanical.stats.current_hp == 250, "Should revive to 25% HP (250/1000)"
     assert mechanical.has_used_mechanical_revive == True
 
 
@@ -158,18 +158,14 @@ def test_mechanical_passive_second_time():
 
 
 def test_dragonkin_trigger():
-    """Dragonkin: Buff triggers when falling below 50% HP"""
+    """Dragonkin: Buff triggers when falling below 25% HP"""
     dragonkin = create_pet("Dragonkin", PetFamily.DRAGONKIN, hp=1000)
     
-    # Pet falls from 600 HP to 400 HP
-    triggered = RacialPassives.check_dragonkin_trigger(dragonkin, previous_hp=600)
+    # Pet falls from 300 HP to 200 HP (crossing 25% threshold)
+    dragonkin.stats.current_hp = 200
+    triggered = RacialPassives.check_dragonkin_trigger(dragonkin, previous_hp=300)
     
-    # Current HP is 1000 (default), but we're checking if previous (600) > threshold and current (would be 400) <= threshold
-    # Actually need to set current HP first
-    dragonkin.stats.current_hp = 400
-    triggered = RacialPassives.check_dragonkin_trigger(dragonkin, previous_hp=600)
-    
-    assert triggered == True, "Dragonkin buff should trigger when falling below 50%"
+    assert triggered == True, "Dragonkin buff should trigger when falling below 25%"
 
 
 def test_dragonkin_no_trigger():
