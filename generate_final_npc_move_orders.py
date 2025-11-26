@@ -3,218 +3,235 @@ import re
 from pathlib import Path
 from collections import defaultdict
 
-ENCOUNTERS_FILE = Path(__file__).resolve().parent / "encounters_full.json"
-STRATEGIES_FILE = Path(__file__).resolve().parent / "strategies_enhanced.json"
-OUTPUT_FILE = Path(__file__).resolve().parent / "npc_move_orders.md"
+# FILE PATHS (Ensure these match your folder structure)
+ENCOUNTERS_FILE = Path(__file__).resolve().parent / "encounters.json"
+STRATEGIES_FILE = Path(__file__).resolve().parent / "strategies_enhanced.json"  # Using the file that exists
+ABILITIES_FILE = Path(__file__).resolve().parent / "abilities.json" # Critical for Cooldowns
+OUTPUT_FILE = Path(__file__).resolve().parent / "npc_move_orders.json"
 
 def load_json(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"[WARN] File not found: {path}")
+        return {}
 
-def get_npc_data(encounters):
-    """
-    Organize encounter data by name for easy lookup.
-    Returns: dict[npc_name] -> {pet_index: {name, abilities: [id, id, id]}}
-    """
+def normalize_name(name):
+    if not name: return ""
+    return re.sub(r'[^a-z0-9]', '', name.lower())
+
+def get_npc_data(encounters, abilities_db):
     npc_lookup = {}
     
-    # Helper to process a list of encounters
     def process_list(enc_list):
         for enc in enc_list:
-            name = enc.get('name')
+            name = enc.get('name') or enc.get('encounter_name')
             if not name: continue
             
+            norm_name = normalize_name(name)
             pets = {}
-            # The key is 'pets', not 'npc_pets'
-            for i, pet in enumerate(enc.get('pets', []), 1):
-                # Get ability objects with details if available, otherwise just IDs
-                abilities = []
-                for ab in pet.get('abilities', []):
-                    # If ab is a dict, it has details. If int, it's just ID.
-                    if isinstance(ab, dict):
-                        abilities.append(ab)
+            pet_list = enc.get('pets') or enc.get('npc_pets') or []
+            
+            for i, pet in enumerate(pet_list, 1):
+                final_abilities = []
+                raw_abilities = pet.get('abilities', [])
+                for ab in raw_abilities:
+                    ab_id = None
+                    if isinstance(ab, dict): ab_id = ab.get('id')
+                    else: ab_id = ab
+                    
+                    # LOOKUP REAL STATS
+                    real_stats = abilities_db.get(str(ab_id)) or abilities_db.get(ab_id)
+                    if real_stats:
+                        final_abilities.append({
+                            'id': int(ab_id),
+                            'name': real_stats.get('name', f"Ability {ab_id}"),
+                            'cooldown': real_stats.get('cooldown', 0)
+                        })
                     else:
-                        abilities.append({'id': ab, 'name': f"Ability {ab}", 'cooldown': 0})
+                        final_abilities.append({'id': int(ab_id), 'name': f"Ability {ab_id}", 'cooldown': 0})
                 
                 pets[i] = {
-                    # Pet name might not be explicit, use species_id or generic
                     'name': pet.get('name', f"Pet {i}"),
-                    'abilities': abilities
+                    'species_id': pet.get('species_id'),
+                    'abilities': final_abilities
                 }
-            npc_lookup[name] = pets
+            
+            npc_lookup[norm_name] = {'real_name': name, 'pets': pets}
 
-    # Iterate through the structure of encounters_full.json
-    # It is a list of encounter objects
-    if isinstance(encounters, list):
-        process_list(encounters)
+    if isinstance(encounters, list): process_list(encounters)
     elif isinstance(encounters, dict):
-        # Fallback if it's a dict (e.g. by expansion)
         for key, val in encounters.items():
-            if isinstance(val, list):
-                process_list(val)
+            if isinstance(val, list): process_list(val)
+            elif isinstance(val, dict):
+                for subkey, subval in val.items():
+                    if isinstance(subval, list): process_list(subval)
                 
     return npc_lookup
 
-def analyze_strategies(strategies_data):
-    """
-    Extract round-specific player actions from strategies.
-    Returns: dict[npc_name] -> {pet_idx: {round: [actions]}}
-    """
+def build_ability_map(pets):
+    mapping = {}
+    for i, pet in pets.items():
+        for ab in pet['abilities']:
+            mapping[str(ab.get('id', ''))] = i
+            if 'name' in ab: mapping[normalize_name(ab['name'])] = i
+    return mapping
+
+def analyze_strategies(strategies_data, npc_lookup):
     npc_observations = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     
-    for expansion, content in strategies_data.items():
-        if isinstance(content, dict):
-            for category, encounter_list in content.items():
-                if isinstance(encounter_list, list):
-                    for enc in encounter_list:
-                        npc_name = enc.get("encounter_name")
-                        if not npc_name: continue
-                        
-                        for strat in enc.get("strategies", []):
-                            script = strat.get("script", "")
-                            lines = script.replace("\r", "\n").split("\n")
-                            current_pet_idx = 1
-                            
-                            for line in lines:
-                                line = line.strip().lower()
-                                if not line or line.startswith("--"): continue
-                                
-                                # Check for active enemy pet
-                                active_match = re.search(r'enemy\(#(\d)\)\.active', line)
-                                if active_match:
-                                    current_pet_idx = int(active_match.group(1))
-                                
-                                # Check for round conditions
-                                round_matches = re.findall(r'\[.*?(?:round|turn)[=~](\d+(?:,\d+)*).*?\]', line)
-                                
-                                # Extract action
-                                action = "Unknown"
-                                if "change" in line:
-                                    action = "swap"
-                                elif "use" in line or "ability" in line:
-                                    # Try to identify defensive moves
-                                    if any(x in line for x in ['dodge', 'deflect', 'block', 'barrier', 'bubble', 'decoy']):
-                                        action = "defensive"
-                                    else:
-                                        action = "attack"
-                                
-                                for rounds in round_matches:
-                                    for r in rounds.split(','):
-                                        try:
-                                            r_num = int(r)
-                                            npc_observations[npc_name][current_pet_idx][r_num].append(action)
-                                        except: pass
+    all_encounters = []
+    if isinstance(strategies_data, list): all_encounters = strategies_data
+    elif isinstance(strategies_data, dict):
+        for k, v in strategies_data.items():
+            if isinstance(v, list): all_encounters.extend(v)
+            elif isinstance(v, dict):
+                for subk, subv in v.items():
+                    if isinstance(subv, list): all_encounters.extend(subv)
+
+    for enc in all_encounters:
+        name = enc.get("encounter_name") or enc.get("name")
+        if not name: continue
+        
+        norm_name = normalize_name(name)
+        if norm_name not in npc_lookup: continue
+            
+        npc_info = npc_lookup[norm_name]
+        ability_map = build_ability_map(npc_info['pets'])
+        
+        for strat in enc.get("strategies", []):
+            script = strat.get("script", "")
+            lines = script.replace("\r", "\n").split("\n")
+            current_pet_idx = 1
+            
+            for line in lines:
+                line = line.strip().lower()
+                if not line or line.startswith("--"): continue
+                
+                active_match = re.search(r'enemy\(#(\d)\)\.(?:active|exists|dead)', line)
+                if active_match: current_pet_idx = int(active_match.group(1))
+                
+                ability_matches = re.findall(r'ability\(([^)]+)\)', line)
+                for ab_ref in ability_matches:
+                    clean_ref = normalize_name(ab_ref.strip("'\""))
+                    if clean_ref in ability_map: current_pet_idx = ability_map[clean_ref]
+
+                round_matches = re.findall(r'\[.*?(?:round|turn)[=~](\d+(?:,\d+)*).*?\]', line)
+                
+                action = "attack"
+                if any(x in line for x in ['dodge', 'deflect', 'block', 'decoy', 'avoid']): action = "nuke"
+                elif "change" in line: action = "swap"
+
+                for rounds in round_matches:
+                    for r in rounds.split(','):
+                        try:
+                            r_num = int(r)
+                            npc_observations[norm_name][current_pet_idx][r_num].append(action)
+                        except: pass
                                         
     return npc_observations
 
-def simulate_npc_move_order(pet_data, observations, max_rounds=15):
-    """
-    Generate the move order for a single NPC pet.
-    """
-    move_order = []
+def simulate_npc_move_order(pet_data, observations, max_rounds=20):
+    move_order = {}
     abilities = pet_data['abilities']
-    
-    # Initialize cooldown trackers
     cooldowns = {ab['id']: 0 for ab in abilities}
     
+    # Priority: Slot 3 > Slot 2 > Slot 1
+    sorted_abilities = sorted(abilities, key=lambda x: abilities.index(x), reverse=True)
+    
+    # Identify Filler Move (0 Cooldown)
+    filler_move = None
+    for ab in abilities:
+        if ab.get('cooldown', 0) == 0:
+            filler_move = ab
+            break
+    # Fallback if no explicit 0-CD move found: use first ability
+    if not filler_move and abilities: filler_move = abilities[0]
+
     for r in range(1, max_rounds + 1):
-        # 1. Check if we have a forced move based on observations
-        # (This is tricky without knowing WHICH ability corresponds to the threat)
-        # For now, we will use the standard priority logic, but we could prioritize
-        # high-cooldown abilities on rounds where the player uses defensives.
-        
-        obs = observations.get(r, [])
-        player_is_defensive = "defensive" in obs
-        
         selected_ability = None
+        obs = observations.get(r, [])
+        is_nuke_turn = "nuke" in obs
         
-        # LOGIC:
-        # 1. Filter available abilities (cooldown == 0)
-        available = [ab for ab in abilities if cooldowns[ab['id']] == 0]
+        # Filter usable (CD=0)
+        usable = [ab for ab in sorted_abilities if cooldowns[ab['id']] == 0]
         
-        if not available:
-            move_order.append("Pass")
-            continue
+        if not usable:
+            # Everything on CD -> Use Filler (Spam)
+            # Note: We assume Filler is always usable or the 'least bad' option
+            selected_ability = filler_move
+        else:
+            if is_nuke_turn:
+                selected_ability = max(usable, key=lambda x: x.get('cooldown', 0))
+            else:
+                selected_ability = usable[0]
             
-        # 2. Sort by priority
-        # Priority 1: If player is defensive, maybe we wasted a big cooldown? 
-        # Actually, if the player IS defensive, it means the NPC IS using a big move.
-        # So we should pick the highest cooldown/highest damage move.
+        move_order[str(r)] = selected_ability['name']
         
-        # Heuristic: Sort by cooldown (descending) then ID (arbitrary stability)
-        # Assuming higher cooldown = stronger move
-        available.sort(key=lambda x: (x.get('cooldown', 0), x['id']), reverse=True)
-        
-        selected_ability = available[0]
-        
-        # 3. Execute
-        move_order.append(selected_ability['name'])
-        
-        # 4. Update cooldowns
-        # Tick down all
         for ab_id in cooldowns:
-            if cooldowns[ab_id] > 0:
-                cooldowns[ab_id] -= 1
-                
-        # Set cooldown for used ability
+            if cooldowns[ab_id] > 0: cooldowns[ab_id] -= 1
+            
         cooldowns[selected_ability['id']] = selected_ability.get('cooldown', 0)
         
     return move_order
 
-def generate_markdown(npc_lookup, npc_observations):
-    lines = ["# Final NPC Move Orders\n\n"]
-    lines.append("Generated by combining Xufu strategy analysis with internal cooldown logic.\n\n")
+def generate_json(npc_lookup, npc_observations):
+    output = {}
     
-    # Sort NPCs by name
-    for npc_name in sorted(npc_lookup.keys()):
-        pets = npc_lookup[npc_name]
+    for norm_name in npc_lookup:
+        npc_data = npc_lookup[norm_name]
+        real_name = npc_data['real_name']
+        pets = npc_data['pets']
         
-        # Skip if no pets found (shouldn't happen for valid encounters)
-        if not pets: continue
-        
-        lines.append(f"## {npc_name}\n\n")
-        
+        npc_moves = {}
         for i in range(1, 4):
             if i not in pets: continue
             pet = pets[i]
-            
-            lines.append(f"### Pet {i}: {pet['name']}\n")
-            
-            # Get observations for this pet
-            obs = npc_observations.get(npc_name, {}).get(i, {})
-            
-            # Simulate
+            obs = npc_observations.get(norm_name, {}).get(i, {})
             moves = simulate_npc_move_order(pet, obs)
+            npc_moves[str(i)] = moves
             
-            # Table
-            lines.append("| Round | Predicted Move | Player Observation |\n")
-            lines.append("| :--- | :--- | :--- |\n")
-            
-            for r, move in enumerate(moves, 1):
-                player_action = ", ".join(set(obs.get(r, [])))
-                if not player_action: player_action = "-"
-                lines.append(f"| {r} | **{move}** | {player_action} |\n")
-            
-            lines.append("\n")
-            
-    return "".join(lines)
+        output[real_name] = npc_moves
+        
+    return output
 
 def main():
     print("Loading data...")
     encounters = load_json(ENCOUNTERS_FILE)
     strategies = load_json(STRATEGIES_FILE)
     
-    print("Processing NPC data...")
-    npc_lookup = get_npc_data(encounters)
+    # NEW: Load Abilities DB
+    ability_data_full = load_json(ABILITIES_FILE)
+    abilities_db = ability_data_full.get('abilities', {})
+    print(f"Loaded {len(abilities_db)} ability definitions.")
     
-    print("Analyzing strategies...")
-    npc_observations = analyze_strategies(strategies)
+    print("Processing NPC data...")
+    npc_lookup = get_npc_data(encounters, abilities_db)
+    print(f"Found {len(npc_lookup)} NPCs.")
+    
+    # DEBUG: Check if any NPCs have abilities with cooldowns
+    npcs_with_abilities = 0
+    for norm_name, npc_data in npc_lookup.items():
+        for pet_id, pet in npc_data['pets'].items():
+            if len(pet['abilities']) > 0:
+                npcs_with_abilities += 1
+                if npcs_with_abilities <= 3:
+                    print(f"  Sample: {npc_data['real_name']} Pet{pet_id} has {len(pet['abilities'])} abilities")
+                    for ab in pet['abilities'][:2]:
+                        print(f"    - {ab['name']} (ID:{ab['id']}, CD:{ab['cooldown']})")
+                break
+    
+    print(f"NPCs with abilities: {npcs_with_abilities}")
+    
+    print("Cross-referencing strategies...")
+    npc_observations = analyze_strategies(strategies, npc_lookup)
     
     print("Generating move orders...")
-    md_content = generate_markdown(npc_lookup, npc_observations)
+    json_content = generate_json(npc_lookup, npc_observations)
     
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        f.write(md_content)
+        json.dump(json_content, f, indent=2)
         
     print(f"✅ Generated {OUTPUT_FILE}")
 
