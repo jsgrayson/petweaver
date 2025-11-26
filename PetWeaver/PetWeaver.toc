@@ -3,7 +3,7 @@
 ## Notes: Smart Pet Battle Strategy Loader
 ## Author: Antigravity
 ## Version: 1.0
-## SavedVariables: PetWeaverDB, PetWeaverProgressDB
+## SavedVariables: PetWeaverDB, PetWeaverProgressDB, PetWeaverEnemyRecordings
 
 PetWeaverData.lua
 PetWeaverDataEnhanced.lua
@@ -24,3 +24,4 @@ PetWeaverAutoLoad.lua
 PetWeaverMinimap.lua
 PetWeaverQueue.lua
 PetWeaverQueueUI.lua
+PetWeaverEnemyRecorder.lua
