@@ -3,61 +3,123 @@ from .battle_state import BattleState, TurnAction
 from .npc_move_loader import get_move_orders
 from .smart_agent import SmartAgent
 
+try:
+    from .npc_ai_loader import load_encounter_ai
+    AI_LOADER_AVAILABLE = True
+except ImportError:
+    AI_LOADER_AVAILABLE = False
+    print("⚠️  NPC AI Loader not available, using fallback logic")
+
 def create_npc_agent(npc_name: str, default_ai: Optional[Callable[[BattleState], TurnAction]] = None) -> Callable[[BattleState], TurnAction]:
     """
-    Creates an AI agent function that prioritizes deterministic move orders.
-    
-    Args:
-        npc_name: The name of the NPC (must match npc_move_orders.md)
-        default_ai: The fallback AI function. If None, uses SmartAgent.
-        
-    Returns:
-        A function that takes BattleState and returns a TurnAction.
+    Creates an NPC agent with Enhanced AI Script Support.
+    Now uses real enemy AI scripts when available.
     """
     move_orders = get_move_orders()
     npc_moves = move_orders.get(npc_name, {})
     
-    # Initialize fallback agent if not provided
+    # Try to load enhanced AI for this encounter
+    enhanced_ai = None
+    if AI_LOADER_AVAILABLE:
+        enhanced_ai = load_encounter_ai(npc_name)
+        if enhanced_ai:
+            print(f"✅ Using enhanced AI for: {npc_name}")
+    
     if default_ai is None:
         smart_agent = SmartAgent(difficulty=1.0)
         default_ai = smart_agent.decide
 
     def npc_agent(state: BattleState) -> TurnAction:
-        # 1. Identify current context
         enemy_team = state.enemy_team
-        active_pet_idx = enemy_team.active_pet_index
         active_pet = enemy_team.get_active_pet()
         
+        # 0. DEATH CHECK (Critical Fix)
+        if active_pet and not active_pet.stats.is_alive():
+            for i, p in enumerate(enemy_team.pets):
+                if p.stats.is_alive():
+                    return TurnAction(actor='enemy', action_type='swap', target_pet_index=i)
+            return TurnAction(actor='enemy', action_type='pass')
+
         if not active_pet:
             return TurnAction(actor='enemy', action_type='pass')
 
-        # Round number. Note: BattleState turn_number starts at 1.
-        # npc_move_orders.md is 1-based.
+        player_pet = state.player_team.get_active_pet()
         current_round = state.turn_number
-        
-        # 2. Check for deterministic move
-        pet_moves = npc_moves.get(active_pet_idx, {})
-        predicted_ability_name = pet_moves.get(current_round)
-        
-        if predicted_ability_name:
-            # 3. Try to find and use the ability
-            # We need to find the ability in the pet's ability list by name
-            matching_ability = next((ab for ab in active_pet.abilities if ab.name == predicted_ability_name), None)
+
+        # 1. Enhanced AI Script Logic (NEW)
+        if enhanced_ai:
+            # A. Priority abilities [round=1]
+            for priority in enhanced_ai.get('priority_abilities', []):
+                if f'[round={current_round}]' in priority['condition']:
+                    matching = next((ab for ab in active_pet.abilities if ab.id == priority['id']), None)
+                    if matching and active_pet.can_use_ability(matching):
+                        return TurnAction(actor='enemy', action_type='ability', ability=matching)
             
-            if matching_ability:
-                # Check if usable (cooldown)
-                # If the prediction says use it, but it's on cooldown, we have a desync.
-                # In that case, we should probably fall back to default AI to avoid crashing/passing.
-                if active_pet.can_use_ability(matching_ability):
-                    return TurnAction(actor='enemy', action_type='ability', ability=matching_ability)
-                else:
-                    # print(f"Warning: Deterministic move {predicted_ability_name} for {npc_name} on round {current_round} is on cooldown. Falling back to AI.")
-                    pass
-            else:
-                # print(f"Warning: Deterministic move {predicted_ability_name} not found in pet abilities. Falling back.")
-                pass
+            # B. HP-based conditionals
+            for hp_cond in enhanced_ai.get('hp_conditionals', []):
+                condition = hp_cond['condition']
                 
-        # 4. Fallback
-        return default_ai(state)
+                # Parse HP condition (e.g., "[enemy.hp>1000]")
+                import re
+                hp_match = re.search(r'enemy\.hp([><=]+)(\d+)', condition)
+                if hp_match:
+                    operator = hp_match.group(1)
+                    threshold = int(hp_match.group(2))
+                    
+                    # Check if condition is met
+                    check_passed = False
+                    if operator == '>' and active_pet.stats.current_hp > threshold:
+                        check_passed = True
+                    elif operator == '<' and active_pet.stats.current_hp < threshold:
+                        check_passed = True
+                    elif operator == '<=' and active_pet.stats.current_hp <= threshold:
+                        check_passed = True
+                    elif operator == '>=' and active_pet.stats.current_hp >= threshold:
+                        check_passed = True
+                    
+                    if check_passed:
+                        matching = next((ab for ab in active_pet.abilities if ab.id == hp_cond['id']), None)
+                        if matching and active_pet.can_use_ability(matching):
+                            return TurnAction(actor='enemy', action_type='ability', ability=matching)
+            
+            # C. General rotation (use first available)
+            for ability in enhanced_ai.get('general_rotation', []):
+                matching = next((ab for ab in active_pet.abilities if ab.id == ability['id']), None)
+                if matching and active_pet.can_use_ability(matching):
+                    return TurnAction(actor='enemy', action_type='ability', ability=matching)
+
+        # 2. Fallback: Check Scripted Move (legacy)
+        pet_moves = npc_moves.get(enemy_team.active_pet_index, {})
+        predicted_name = pet_moves.get(current_round)
+        
+        if predicted_name:
+            matching = next((ab for ab in active_pet.abilities if ab.name == predicted_name), None)
+            if matching and active_pet.can_use_ability(matching):
+                return TurnAction(actor='enemy', action_type='ability', ability=matching)
+
+        # 3. Priority Logic (legacy fallback)
+        
+        # A. Kill Shot
+        for abil in active_pet.abilities:
+            if active_pet.can_use_ability(abil):
+                if abil.power >= player_pet.stats.current_hp:
+                     return TurnAction(actor='enemy', action_type='ability', ability=abil)
+        
+        # B. Cooldowns (Smart Check)
+        if len(active_pet.abilities) > 2:
+            slot3 = active_pet.abilities[2]
+            if active_pet.can_use_ability(slot3):
+                if "Heal" in slot3.name and active_pet.stats.current_hp > active_pet.stats.max_hp * 0.9: pass
+                else: return TurnAction(actor='enemy', action_type='ability', ability=slot3)
+
+        if len(active_pet.abilities) > 1:
+            slot2 = active_pet.abilities[1]
+            if active_pet.can_use_ability(slot2):
+                if "Heal" in slot2.name and active_pet.stats.current_hp > active_pet.stats.max_hp * 0.9: pass
+                else: return TurnAction(actor='enemy', action_type='ability', ability=slot2)
+
+        # C. Spam Slot 1
+        slot1 = active_pet.abilities[0]
+        return TurnAction(actor='enemy', action_type='ability', ability=slot1)
 
     return npc_agent
