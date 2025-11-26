@@ -12,6 +12,13 @@ def main():
     print("Loading enhanced AI scripts...")
     loader = get_ai_loader()
     
+    # CRITICAL FIX: Load abilities database for cooldowns
+    print("Loading abilities database...")
+    with open('abilities.json', 'r') as f:
+        abilities_data = json.load(f)
+    abilities_db = abilities_data.get('abilities', {})
+    print(f"✅ Loaded {len(abilities_db)} ability definitions")
+    
     print(f"✅ Loaded {len(loader.ai_scripts)} AI scripts\n")
     
     # Generate move orders for encounters with AI
@@ -32,16 +39,22 @@ def main():
             continue
         
         # Build mock pet data for simulation
-        # Use the abilities from the AI script
+        # Use the abilities from the AI script WITH REAL COOLDOWNS
         abilities_list = []
         seen_ids = set()
         
         for ability in all_abilities:
             if ability['id'] not in seen_ids:
+                # CRITICAL FIX: Look up real cooldown from abilities database
+                real_cooldown = 0
+                ability_info = abilities_db.get(str(ability['id']))
+                if ability_info:
+                    real_cooldown = ability_info.get('cooldown', 0)
+                
                 abilities_list.append({
                     'id': ability['id'],
                     'name': ability['name'],
-                    'cooldown': 0  # Default, would need real data
+                    'cooldown': real_cooldown  # FIXED: Use real cooldown!
                 })
                 seen_ids.add(ability['id'])
         
