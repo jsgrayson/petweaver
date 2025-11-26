@@ -3,10 +3,10 @@ import re
 from pathlib import Path
 from collections import defaultdict
 
-# FILE PATHS (Ensure these match your folder structure)
+# FILE PATHS
 ENCOUNTERS_FILE = Path(__file__).resolve().parent / "encounters.json"
-STRATEGIES_FILE = Path(__file__).resolve().parent / "strategies_enhanced.json"  # Using the file that exists
-ABILITIES_FILE = Path(__file__).resolve().parent / "abilities.json" # Critical for Cooldowns
+STRATEGIES_FILE = Path(__file__).resolve().parent / "strategies_enhanced.json"  # FIXED: Use existing file
+ABILITIES_FILE = Path(__file__).resolve().parent / "abilities.json" # CRITICAL
 OUTPUT_FILE = Path(__file__).resolve().parent / "npc_move_orders.json"
 
 def load_json(path):
@@ -24,49 +24,44 @@ def normalize_name(name):
 def get_npc_data(encounters, abilities_db):
     npc_lookup = {}
     
-    def process_list(enc_list):
-        for enc in enc_list:
-            name = enc.get('name') or enc.get('encounter_name')
-            if not name: continue
+    # Handle dict structure (encounters.json is a dict with encounter keys)
+    for enc_key, enc_data in encounters.items():
+        name = enc_data.get('name') or enc_key
+        
+        norm_name = normalize_name(name)
+        pets = {}
+        pet_list = enc_data.get('pets') or enc_data.get('npc_pets') or []
+        
+        for i, pet in enumerate(pet_list, 1):
+            final_abilities = []
+            raw_abilities = pet.get('abilities', [])
             
-            norm_name = normalize_name(name)
-            pets = {}
-            pet_list = enc.get('pets') or enc.get('npc_pets') or []
-            
-            for i, pet in enumerate(pet_list, 1):
-                final_abilities = []
-                raw_abilities = pet.get('abilities', [])
-                for ab in raw_abilities:
-                    ab_id = None
-                    if isinstance(ab, dict): ab_id = ab.get('id')
-                    else: ab_id = ab
-                    
-                    # LOOKUP REAL STATS
-                    real_stats = abilities_db.get(str(ab_id)) or abilities_db.get(ab_id)
-                    if real_stats:
-                        final_abilities.append({
-                            'id': int(ab_id),
-                            'name': real_stats.get('name', f"Ability {ab_id}"),
-                            'cooldown': real_stats.get('cooldown', 0)
-                        })
-                    else:
-                        final_abilities.append({'id': int(ab_id), 'name': f"Ability {ab_id}", 'cooldown': 0})
+            for ab in raw_abilities:
+                ab_id = None
+                if isinstance(ab, dict): ab_id = ab.get('id')
+                else: ab_id = ab
                 
-                pets[i] = {
-                    'name': pet.get('name', f"Pet {i}"),
-                    'species_id': pet.get('species_id'),
-                    'abilities': final_abilities
-                }
+                # LOOKUP REAL STATS IN ABILITY DB
+                real_stats = abilities_db.get(str(ab_id)) or abilities_db.get(ab_id)
+                
+                if real_stats:
+                    final_abilities.append({
+                        'id': int(ab_id),
+                        'name': real_stats.get('name', f"Ability {ab_id}"),
+                        'cooldown': real_stats.get('cooldown', 0)
+                    })
+                else:
+                    # If missing in DB, default to 0 CD
+                    name_guess = ab.get('name', f"Ability {ab_id}") if isinstance(ab, dict) else f"Ability {ab_id}"
+                    final_abilities.append({'id': int(ab_id), 'name': name_guess, 'cooldown': 0})
             
-            npc_lookup[norm_name] = {'real_name': name, 'pets': pets}
-
-    if isinstance(encounters, list): process_list(encounters)
-    elif isinstance(encounters, dict):
-        for key, val in encounters.items():
-            if isinstance(val, list): process_list(val)
-            elif isinstance(val, dict):
-                for subkey, subval in val.items():
-                    if isinstance(subval, list): process_list(subval)
+            pets[i] = {
+                'name': pet.get('name', f"Pet {i}"),
+                'species_id': pet.get('species_id'),
+                'abilities': final_abilities
+            }
+        
+        npc_lookup[norm_name] = {'real_name': name, 'pets': pets}
                 
     return npc_lookup
 
@@ -135,6 +130,10 @@ def analyze_strategies(strategies_data, npc_lookup):
 def simulate_npc_move_order(pet_data, observations, max_rounds=20):
     move_order = {}
     abilities = pet_data['abilities']
+    
+    # If no abilities found, return empty dict (prevents crash/spam)
+    if not abilities: return {}
+
     cooldowns = {ab['id']: 0 for ab in abilities}
     
     # Priority: Slot 3 > Slot 2 > Slot 1
@@ -146,7 +145,7 @@ def simulate_npc_move_order(pet_data, observations, max_rounds=20):
         if ab.get('cooldown', 0) == 0:
             filler_move = ab
             break
-    # Fallback if no explicit 0-CD move found: use first ability
+    # If no explicit 0-CD move found, default to first ability (better than passing)
     if not filler_move and abilities: filler_move = abilities[0]
 
     for r in range(1, max_rounds + 1):
@@ -158,9 +157,9 @@ def simulate_npc_move_order(pet_data, observations, max_rounds=20):
         usable = [ab for ab in sorted_abilities if cooldowns[ab['id']] == 0]
         
         if not usable:
-            # Everything on CD -> Use Filler (Spam)
-            # Note: We assume Filler is always usable or the 'least bad' option
-            selected_ability = filler_move
+            # If everything on CD, use filler
+            if filler_move: selected_ability = filler_move
+            else: continue # Pass
         else:
             if is_nuke_turn:
                 selected_ability = max(usable, key=lambda x: x.get('cooldown', 0))
@@ -207,22 +206,9 @@ def main():
     print(f"Loaded {len(abilities_db)} ability definitions.")
     
     print("Processing NPC data...")
+    # Pass ability DB to hydration function
     npc_lookup = get_npc_data(encounters, abilities_db)
     print(f"Found {len(npc_lookup)} NPCs.")
-    
-    # DEBUG: Check if any NPCs have abilities with cooldowns
-    npcs_with_abilities = 0
-    for norm_name, npc_data in npc_lookup.items():
-        for pet_id, pet in npc_data['pets'].items():
-            if len(pet['abilities']) > 0:
-                npcs_with_abilities += 1
-                if npcs_with_abilities <= 3:
-                    print(f"  Sample: {npc_data['real_name']} Pet{pet_id} has {len(pet['abilities'])} abilities")
-                    for ab in pet['abilities'][:2]:
-                        print(f"    - {ab['name']} (ID:{ab['id']}, CD:{ab['cooldown']})")
-                break
-    
-    print(f"NPCs with abilities: {npcs_with_abilities}")
     
     print("Cross-referencing strategies...")
     npc_observations = analyze_strategies(strategies, npc_lookup)
