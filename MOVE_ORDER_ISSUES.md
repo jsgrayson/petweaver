@@ -1,59 +1,59 @@
-# Move Order Generation Issues
+# Final Analysis: Move Order Data Sources
 
-## Problem Summary
-The "Black Claw spam" bug exists in the enhanced AI move orders because `regenerate_move_orders.py` doesn't properly handle cooldowns when generating move sequences from AI scripts.
+## All Attempts to Fix encounters.json FAILED
+
+### Attempt 1: Hydration from abilities.json
+**Result:** ❌ Species ID mismatch (0 pets hydrated)
+
+### Attempt 2: Rebuild from wow_tamer_abilities.csv  
+**Result:** ❌ CSV has placeholder data
+- All 57 encounters generated
+- **ALL pets have identical abilities:** Crush, Stoneskin, Haymaker
+- CSV is template data, not real NPC abilities
+
+### Attempt 3: Generate from strategies (encounters.json + abilities.json)
+**Result:** ❌ encounters.json has empty abilities arrays (0 moves generated)
 
 ## Root Cause
+**No valid source data exists for NPC abilities** except the enhanced AI system.
 
-###encounters.json Data Issue
-- **All pets have empty `abilities: []` arrays**
-- Species IDs in encounters.json: 1, 872, 873, 890...
-- Species IDs in abilities.json: 2051, 2062, 2446...
-- **The databases are completely incompatible**
+## Only Working Solution
+**`npc_move_orders_enhanced.json`** (123 encounters)
+- Generated from analyzing 182,452 player battles
+- Real, diverse abilities per encounter
+- Known issue: Cooldown tracking bug causes some spam
 
-### Failed Approaches
+## Data Quality Check Results
 
-1. **`generate_final_npc_move_orders.py`**
-   - Tries to load abilities from encounters.json
-   - encounters.json has no abilities  
-   - Result: Generates 153 NPCs with 0 moves each
+### wow_tamer_abilities.csv
+```
+Julia Stevens,872,Crush,Stoneskin,Haymaker,Body Slam,Takedown,Bandage
+Julia Stevens,873,Crush,Stoneskin,Haymaker,Body Slam,Takedown,Bandage
+Zunta,874,Crush,Stoneskin,Haymaker,Body Slam,Takedown,Bandage
+```
+**Every pet:** Same 6 abilities → **Template/placeholder data**
 
-2. **`fix_encounters.py`** (hydration attempt)
-   - Tries to map species IDs from abilities.json
-   - Species IDs don't match between files
-   - Result: 0 pets hydrated successfully
+### encounters.json (original)
+```json
+{"species_id": 872, "abilities": []}
+{"species_id": 873, "abilities": []}
+```
+**All pets:** Empty abilities array → **Incomplete export**
 
-3. **`regenerate_move_orders.py`** (current enhanced AI)
-   - Generates moves from enhanced AI scripts
-   - **Bug:** Doesn't track cooldowns properly
-   - Result: Black Claw spam (uses same move every turn)
-
-## Current Status
-
-**Working File:** `npc_move_orders_enhanced.json` (123 encounters)
-**Issue:** Has cooldown bugs (spam issue)
-**Why We Use It:** Only data source available
-
-## The Real Solution Needed
-
-To fix the Black Claw spam in `regenerate_move_orders.py`:
-
-1. Load `enhanced_enemy_npc_scripts.json` for AI logic
-2. Load `abilities.json` to get cooldown data for each ability ID
-3. When simulating moves, track cooldowns properly:
-   - After using ability with CD=3, mark it unavailable for 3 turns
-   - Only allow abilities with CD=0 currently
-   - Use filler move (CD=0) when everything on cooldown
-
-## Why encounters.json Can't Be Fixed
-
-- Empty abilities arrays
-- Incompatible species ID mappings  
-- No way to hydrate without correct species-to-abilities database
-- Different data sources (game data vs community data)
+### enhanced_enemy_npc_scripts.json ✓
+```
+"Captain" Klutz: use(Black Claw:919) [round=1]
+Ashlei: use(Immolate:178) [round=1]
+```
+**123 encounters:** Real abilities from battle analysis → **VALID**
 
 ## Recommendation
+1. Accept enhanced AI data with cooldown bugs
+2. OR fix `regenerate_move_orders.py` to properly track cooldowns
+3. Don't attempt to use CSV or encounters.json - data is fundamentally flawed
 
-**Accept the enhanced AI data as-is** or **fix `regenerate_move_orders.py`** to properly track cooldowns when generating from AI scripts.
-
-Don't try to fix encounters.json - it's fundamentally incompatible with abilities.json.
+## Validation Checklist for Future
+- [ ] Check for duplicate ability sets across NPCs
+- [ ] Verify unique abilities per encounter
+- [ ] Sample multiple encounters before claiming success
+- [ ] Cross-reference with known battles
