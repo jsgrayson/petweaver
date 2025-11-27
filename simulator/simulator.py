@@ -225,8 +225,36 @@ class BattleSimulator:
             self.log.add_event({'type': 'buff_applied', 'target': defender.name, 'buff': 'Shattered Defenses', 'turn': turn_number})
 
     def process_end_of_turn(self, state, p1, p2):
+        """
+        Process end-of-turn effects in STRICT order:
+        1. Weather damage
+        2. DoT damage
+        3. Death checks (if DoT kills, stop here)
+        4. HoT healing (only if alive)
+        5. Buff duration decrement
+        """
         for p in [p1, p2]:
-            if p and p.stats.is_alive():
+            if not p:
+                continue
+                
+            # 1. Weather damage (if any active weather)
+            if state.weather and p.stats.is_alive():
+                self.buff_tracker.process_weather_damage(state.weather, p)
+                
+            # 2. DoT damage
+            if p.stats.is_alive():
                 self.buff_tracker.process_dots(p)
-                self.buff_tracker.process_hots(p)
+                
+            # 3. Death check - if DoT killed pet, skip HoT
+            if not p.stats.is_alive():
+                self.log.add_event({'type': 'death', 'pet': p.name, 'reason': 'DoT'})
+                # Do not process HoT for dead pets
                 self.buff_tracker.decrement_durations(p)
+                continue
+                
+            # 4. HoT healing (only if still alive after DoT)
+            if p.stats.is_alive():
+                self.buff_tracker.process_hots(p)
+                
+            # 5. Decrement buff durations
+            self.buff_tracker.decrement_durations(p)

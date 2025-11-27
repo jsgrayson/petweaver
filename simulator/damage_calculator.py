@@ -285,7 +285,9 @@ class DamageCalculator:
                 details['blocked'] = True
                 return 0, details
 
-        final_damage = int(final_damage * damage_reduction)
+        # ❌ REMOVED: Duplicate damage_reduction application (was line 288)
+        # Damage reduction already applied on line 274
+        
         
         # Apply Magic racial passive (damage cap at 35% max HP)
         if defender.family == PetFamily.MAGIC:

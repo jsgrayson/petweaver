@@ -73,6 +73,54 @@ class BuffTracker:
         pet.active_buffs = [b for b in pet.active_buffs if b.type != buff_type]
     
     @staticmethod
+    def process_weather_damage(weather: str, pet: Pet) -> List[Dict]:
+        """
+        Apply weather DoT damage at start of cleanup phase
+        
+        Args:
+            weather: Weather effect name (e.g., 'scorched_earth', 'call_lightning')
+            pet: Pet to apply weather damage to
+            
+        Returns:
+            List of damage events
+        """
+        events = []
+        
+        # Weather DoT effects
+        weather_dots = {
+            'scorched_earth': {
+                'damage': 35,
+                'damage_type': 'Dragonkin',
+                'immune_family': PetFamily.ELEMENTAL
+            },
+            'call_lightning': {
+                'damage': 30,
+                'damage_type': 'Elemental',
+                'immune_family': None
+            }
+        }
+        
+        weather_effect = weather_dots.get(weather)
+        if not weather_effect:
+            return events
+            
+        # Check immunity (Elementals immune to Scorched Earth)
+        if weather_effect['immune_family'] and pet.family == weather_effect['immune_family']:
+            return events
+            
+        # Apply weather damage
+        damage = weather_effect['damage']
+        actual_damage = pet.stats.take_damage(damage)
+        events.append({
+            'type': 'weather_damage',
+            'amount': actual_damage,
+            'source': weather,
+            'damage_type': weather_effect['damage_type']
+        })
+        
+        return events
+    
+    @staticmethod
     def process_dots(pet: Pet) -> List[Dict]:
         """Process Damage Over Time effects"""
         events = []
