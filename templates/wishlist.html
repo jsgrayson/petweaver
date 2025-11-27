@@ -106,7 +106,11 @@
             <!-- Wishlist Items -->
             <div class="col-md-8">
                 <div class="card">
-                    <div class="card-header">My Wishlist</div>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>My Wishlist</span>
+                        <button onclick="exportForAddon()" class="btn btn-sm btn-outline-light">Export for
+                            Addon</button>
+                    </div>
                     <div class="card-body">
                         <table class="table table-dark table-hover">
                             <thead>
@@ -213,6 +217,14 @@
                 alertBox.innerHTML = 'No match found.';
                 alertBox.style.display = 'block';
             }
+        }
+
+        // Export for Addon
+        async function exportForAddon() {
+            const res = await fetch('/api/wishlist');
+            const data = await res.json();
+            const exportStr = data.map(i => `${i.speciesId}:${i.breedId}`).join(',');
+            prompt("Copy this string for PetWeaver addon (/petweaver import):", exportStr);
         }
 
         // Init

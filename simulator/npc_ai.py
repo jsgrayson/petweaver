@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 from .battle_state import BattleState, TurnAction
 from .npc_move_loader import get_move_orders
 from .smart_agent import SmartAgent
@@ -10,7 +10,9 @@ except ImportError:
     AI_LOADER_AVAILABLE = False
     print("⚠️  NPC AI Loader not available, using fallback logic")
 
-def create_npc_agent(npc_name: str, default_ai: Optional[Callable[[BattleState], TurnAction]] = None) -> Callable[[BattleState], TurnAction]:
+_NPC_PRIORITIES_CACHE = None
+
+def create_npc_agent(npc_name: str, default_ai: Optional[Callable[[BattleState], TurnAction]] = None, priority_script: Optional[List] = None) -> Callable[[BattleState], TurnAction]:
     """
     Creates an NPC agent with Enhanced AI Script Support.
     Now uses real enemy AI scripts when available.
@@ -29,17 +31,22 @@ def create_npc_agent(npc_name: str, default_ai: Optional[Callable[[BattleState],
         smart_agent = SmartAgent(difficulty=1.0)
         default_ai = smart_agent.decide
 
-    # Load extracted priorities if available
-    import json
-    import os
-    npc_priorities = {}
-    try:
-        if os.path.exists('npc_ai_priorities.json'):
-            with open('npc_ai_priorities.json', 'r') as f:
-                npc_priorities = json.load(f)
-                print(f"✅ Loaded {len(npc_priorities)} AI priority scripts")
-    except Exception as e:
-        print(f"⚠️ Failed to load AI priorities: {e}")
+    # Load extracted priorities if available (Cached)
+    # Only load if we don't have an injected script
+    global _NPC_PRIORITIES_CACHE
+    if not priority_script and _NPC_PRIORITIES_CACHE is None:
+        import json
+        import os
+        _NPC_PRIORITIES_CACHE = {}
+        try:
+            if os.path.exists('npc_ai_priorities.json'):
+                with open('npc_ai_priorities.json', 'r') as f:
+                    _NPC_PRIORITIES_CACHE = json.load(f)
+                    print(f"✅ Loaded {len(_NPC_PRIORITIES_CACHE)} AI priority scripts")
+        except Exception as e:
+            print(f"⚠️ Failed to load AI priorities: {e}")
+    
+    npc_priorities = _NPC_PRIORITIES_CACHE or {}
 
     def npc_agent(state: BattleState) -> TurnAction:
         enemy_team = state.enemy_team
@@ -59,13 +66,17 @@ def create_npc_agent(npc_name: str, default_ai: Optional[Callable[[BattleState],
         current_round = state.turn_number
 
         # 1. CHECK EXTRACTED PRIORITIES (NEW)
-        # Construct key for current team: "id1,id2,id3"
-        team_key = ",".join(str(p.species_id) for p in enemy_team.pets)
-        priority_script = npc_priorities.get(team_key)
+        # Use injected script if available, otherwise check cache
+        script_to_use = priority_script
         
-        if priority_script:
+        if not script_to_use:
+            # Construct key for current team: "id1,id2,id3"
+            team_key = ",".join(str(p.species_id) for p in enemy_team.pets)
+            script_to_use = npc_priorities.get(team_key)
+        
+        if script_to_use:
             # Evaluate script
-            for step in priority_script:
+            for step in script_to_use:
                 # Check condition
                 condition_met = True
                 if step.get('condition'):

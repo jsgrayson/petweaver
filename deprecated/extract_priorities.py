@@ -84,9 +84,9 @@ def extract_priorities():
                 
     print(f"Extracted scripts for {count} teams.")
     
-    with open('npc_ai_priorities.json', 'w') as f:
+    with open('player_scripts.json', 'w') as f:
         json.dump(priorities_db, f, indent=2)
-    print("Saved to npc_ai_priorities.json")
+    print("Saved to player_scripts.json")
 
 if __name__ == "__main__":
     extract_priorities()

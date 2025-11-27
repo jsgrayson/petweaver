@@ -64,6 +64,24 @@ class StrategyManager:
             self.lookup_cache[npc_name] = result
             return result
             
+        # Fallback: Substring match (e.g. "Squirt" in "Next Squirt Day:")
+        # We search for the npc_name inside the encounter name, or vice versa
+        for expansion, categories in self.strategies.items():
+            for category, encounters in categories.items():
+                for encounter in encounters:
+                    enc_name = encounter.get('encounter_name', '')
+                    # Check if significant part of name matches
+                    # e.g. "Squirt"
+                    clean_npc = npc_name.lower().replace('(wod garrison)', '').strip()
+                    clean_enc = enc_name.lower().replace('next ', '').replace(' day:', '').strip()
+                    
+                    if clean_npc in enc_name.lower() or clean_enc in npc_name.lower():
+                         # Verify it's not a generic match like "The"
+                         if len(clean_npc) > 3:
+                            result = self._process_encounter(encounter)
+                            self.lookup_cache[npc_name] = result
+                            return result
+
         return None
 
     def _process_encounter(self, encounter):

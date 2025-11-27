@@ -9,12 +9,14 @@ except ImportError:
 from .genome import TeamGenome
 
 class FitnessEvaluator:
-    def __init__(self, target_team: Team, ability_db: Dict, species_db: Dict, npc_priorities: Dict = None, target_name: str = "Unknown"):
+    def __init__(self, target_team: Team, ability_db: Dict, species_db: Dict, npc_priorities: Dict = None, target_name: str = "Unknown", capture_mode: bool = False, target_slot: int = 0):
         self.target_team = target_team
         self.ability_db = ability_db
         self.species_db = species_db
         self.npc_priorities = npc_priorities or {}
         self.target_name = target_name
+        self.capture_mode = capture_mode
+        self.target_slot = target_slot  # Which enemy slot to capture (0, 1, or 2)
         self.simulator = BattleSimulator(rng_seed=None) 
         print("[SYSTEM] Fitness Evaluator: SAFETY_PATCH Loaded.")
 
@@ -25,10 +27,22 @@ class FitnessEvaluator:
         from simulator.npc_ai import create_npc_agent
         from simulator.smart_agent import create_smart_enemy_agent
         
-        # Convert npc_priorities keys to integers
-        priorities = {int(k): v for k, v in self.npc_priorities.items()} if self.npc_priorities else None
-        base_agent = create_smart_enemy_agent(difficulty=1.0, ability_priorities=priorities)
-        enemy_agent = create_npc_agent(self.target_name, base_agent)
+        # Handle Priority Script (New Format - List) vs Ability Priorities (Old Format - Dict)
+        priority_script = None
+        ability_priorities = None
+        
+        if isinstance(self.npc_priorities, list):
+            priority_script = self.npc_priorities
+        elif isinstance(self.npc_priorities, dict):
+            # Convert keys to int if possible (Old format)
+            try:
+                ability_priorities = {int(k): v for k, v in self.npc_priorities.items()}
+            except ValueError:
+                # Might be the huge dict of scripts? We shouldn't be passing the huge dict here anymore.
+                pass
+
+        base_agent = create_smart_enemy_agent(difficulty=1.0, ability_priorities=ability_priorities)
+        enemy_agent = create_npc_agent(self.target_name, base_agent, priority_script=priority_script)
         
         def genome_agent(state: BattleState) -> TurnAction:
             active_idx = state.player_team.active_pet_index
@@ -126,14 +140,52 @@ class FitnessEvaluator:
 
             battle_score = 0
             if result.get('final_state'):
-                enemy_rem = sum(p.stats.current_hp for p in result['final_state'].enemy_team.pets)
-                dmg_pct = (enemy_max_hp - enemy_rem) / max(1, enemy_max_hp)
-                battle_score += (dmg_pct * 5000)
+                # CAPTURE MODE SCORING
+                if self.capture_mode:
+                    target_pet = result['final_state'].enemy_team.pets[self.target_slot]
+                    target_hp_pct = target_pet.stats.current_hp / max(1, target_pet.stats.max_hp)
+                    
+                    # Check if target is alive
+                    if not target_pet.stats.is_alive():
+                        # Killed target - bad, but not as bad as losing
+                        battle_score += 1000
+                    elif target_hp_pct < 0.35:
+                        # Target in capture range - PERFECT!
+                        battle_score += 100000
+                        # Bonus for being close to 35%
+                        closeness = 1.0 - abs(target_hp_pct - 0.35)
+                        battle_score += closeness * 10000
+                    else:
+                        # Target alive but not in range - reward progress
+                        battle_score += (1.0 - target_hp_pct) * 50000
+                   
+                    # Check non-target pets are dead
+                    for i, pet in enumerate(result['final_state'].enemy_team.pets):
+                        if i == self.target_slot:
+                            continue
+                        if not pet.stats.is_alive():
+                            battle_score += 20000
+                        else:
+                            hp_pct = pet.stats.current_hp / max(1, pet.stats.max_hp)
+                            battle_score -= hp_pct * 10000
+                    
+                    # Reward our pet survival
+                    for pet in result['final_state'].player_team.pets:
+                        if pet.stats.is_alive():
+                            hp_pct = pet.stats.current_hp / max(1, pet.stats.max_hp)
+                            battle_score += hp_pct * 5000
                 
-                for i, enemy_p in enumerate(result['final_state'].enemy_team.pets):
-                    if not enemy_p.stats.is_alive():
-                         battle_score += 2000 * (2 ** i)
-
+                # NORMAL MODE SCORING
+                else:
+                    enemy_rem = sum(p.stats.current_hp for p in result['final_state'].enemy_team.pets)
+                    dmg_pct = (enemy_max_hp - enemy_rem) / max(1, enemy_max_hp)
+                    battle_score += (dmg_pct * 5000)
+                    
+                    for i, enemy_p in enumerate(result['final_state'].enemy_team.pets):
+                        if not enemy_p.stats.is_alive():
+                             battle_score += 2000 * (2 ** i)
+                
+                # Common scoring for both modes
                 surviving = sum(1 for p in result['final_state'].player_team.pets if p.stats.is_alive())
                 battle_score += (surviving * 500)
             
@@ -168,6 +220,15 @@ class FitnessEvaluator:
     def _genome_to_team(self, genome: TeamGenome) -> Team:
         pets = []
         for pet_gene in genome.pets:
+            if pet_gene.species_id == -1:
+                # Level 1 Carry Pet
+                try: fam = PetFamily.CRITTER
+                except: fam = PetFamily(4)
+                
+                stats = PetStats(max_hp=150, current_hp=150, power=0, speed=0)
+                pets.append(Pet(species_id=-1, name="Level 1 Carry", family=fam, stats=stats, abilities=[], quality=PetQuality.POOR))
+                continue
+
             species_data = self.species_db.get(str(pet_gene.species_id)) or self.species_db.get(pet_gene.species_id)
             
             base = {'health': 8, 'power': 8, 'speed': 8}

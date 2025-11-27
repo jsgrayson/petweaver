@@ -56,10 +56,10 @@ def build_target_team():
             family=family,
             quality=PetQuality.RARE,
             stats=PetStats(
-                max_hp=npc_pet['health'],
-                current_hp=npc_pet['health'],
-                power=npc_pet['power'],
-                speed=npc_pet['speed']
+                max_hp=npc_pet.get('stats', {}).get('health', npc_pet.get('health', 1546)),
+                current_hp=npc_pet.get('stats', {}).get('health', npc_pet.get('health', 1546)),
+                power=npc_pet.get('stats', {}).get('power', npc_pet.get('power', 273)),
+                speed=npc_pet.get('stats', {}).get('speed', npc_pet.get('speed', 273))
             ),
             abilities=abilities
         ))

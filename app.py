@@ -48,13 +48,48 @@ state = {
 
 from market_manager import MarketManager
 from combat_manager import CombatManager
+from wishlist_manager import WishlistManager
+from goblin_integrator import GoblinIntegrator
 
 # Initialize Managers
 strategy_manager = StrategyManager(os.path.join(os.path.dirname(__file__), "strategies_master.json"))
 market_manager = MarketManager()
 combat_manager = CombatManager()
+wishlist_manager = WishlistManager()
+goblin_integrator = GoblinIntegrator(market_manager)
+goblin_integrator.start()
 
 # ... (existing code) ...
+
+@app.route('/api/wishlist', methods=['GET', 'POST', 'DELETE'])
+def handle_wishlist():
+    if request.method == 'GET':
+        return jsonify(wishlist_manager.get_wishlist())
+    
+    data = request.json
+    if request.method == 'POST':
+        success, msg = wishlist_manager.add_item(
+            data.get('speciesId'),
+            data.get('petName'),
+            data.get('breedId'),
+            data.get('breedName')
+        )
+        return jsonify({"status": "success" if success else "error", "message": msg})
+        
+    if request.method == 'DELETE':
+        success = wishlist_manager.remove_item(data.get('speciesId'), data.get('breedId'))
+        return jsonify({"status": "success" if success else "error"})
+
+@app.route('/api/scan_wild_pet', methods=['POST'])
+def scan_wild_pet():
+    data = request.json
+    match, item = wishlist_manager.check_match(data.get('speciesId'), data.get('breedId'))
+    if match:
+        return jsonify({
+            "alert": True, 
+            "message": f"Found {item['petName']} ({item['breedName']})!"
+        })
+    return jsonify({"alert": False})
 
 @app.route('/wishlist')
 def wishlist_page():
@@ -83,6 +118,38 @@ def get_market_deals():
     threshold = float(request.args.get('threshold', 0.5))
     deals = market_manager.get_deals(threshold)
     return jsonify(deals)
+
+@app.route('/api/market/missing')
+def get_missing_deals():
+    return jsonify(market_manager.get_missing_deals())
+
+@app.route('/api/market/arbitrage')
+def get_arbitrage_flips():
+    return jsonify(market_manager.get_arbitrage_flips())
+
+# --- Combat Logs ---
+from combat_log_parser import CombatLogParser
+
+combat_parser = CombatLogParser(
+    saved_vars_path=os.path.join(ADDON_PATH, 'SavedVariables', 'PetWeaver.lua')
+)
+
+@app.route('/api/combat-logs')
+def get_combat_logs():
+    # In a real app, we'd cache this
+    logs = combat_parser.parse_logs()
+    return jsonify(logs)
+
+@app.route('/api/combat-logs/latest')
+def get_latest_combat_log():
+    logs = combat_parser.parse_logs()
+    if logs:
+        return jsonify(logs[-1])
+    return jsonify({})
+
+@app.route('/combat-logs')
+def combat_logs_page():
+    return render_template('combat_log.html')
 
 @app.route('/api/market/data', methods=['GET'])
 def get_market_data():
@@ -722,12 +789,12 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
             genetic_state["log"].append(f"Loaded encounter: {encounter_data['name']}")
             
         except FileNotFoundError:
-            # NO MOCK DATA - require real encounters.json
-            genetic_state["log"].append("❌ ERROR: encounters.json not found!")
-            genetic_state["log"].append("This is a SIMULATION - requires REAL encounter data.")
-            genetic_state["log"].append("Run: ./venv/bin/python convert_lua_to_encounters.py")
+            # NO MOCK DATA - require real encounters_complete.json
+            genetic_state["log"].append("❌ ERROR: encounters_complete.json not found!")
             genetic_state["status"] = "ERROR"
-            raise FileNotFoundError("encounters.json is required - no mock data allowed")
+            genetic_state["best_fitness"] = 0
+            genetic_state["avg_fitness"] = 0
+            raise FileNotFoundError("encounters_complete.json is required - no mock data allowed")
         
         # 2. Setup Data (Real Data + Manual Overrides)
         try:
@@ -804,6 +871,10 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
             # Extract available species IDs
             available_species = []
             for pet in collection_data.get('pets', []):
+                # ... existing logic ...
+            
+            # Pass collection to MarketManager for cross-referencing
+            market_manager.set_collection(collection_data.get('pets', []))
                 if 'species' in pet:
                     sid = pet['species']['id']
                     # Only include if we have ability data for it
@@ -1109,77 +1180,16 @@ def test_page():
 @app.route('/api/encounters')
 def get_encounters():
     """
-    Serve encounters with complete ability data from encounters_full.json
-    merged with species stats and family information.
+    Serve encounters from encounters_complete.json
     """
     try:
-        # Load encounters_full.json with complete ability data
-        with open('encounters_full.json', 'r') as f:
-            encounters_full = json.load(f)
-        
-        # Load species data for stats and family
-        species_data = {}
-        if os.path.exists('species_data.json'):
-            with open('species_data.json', 'r') as f:
-                species_raw = json.load(f)
-                species_data = {int(k): v for k, v in species_raw.items()}
-        
-        # Convert to old format for compatibility
-        encounters_dict = {}
-        for tamer in encounters_full:
-            # Create key from name (lowercase, replace spaces with hyphens)
-            key = tamer['name'].lower().replace(' ', '-').replace("'", "")
-            
-            encounters_dict[key] = {
-                'id': tamer.get('npc_id', 0),
-                'name': tamer['name'],
-                'npc_pets': []
-            }
-            
-            for pet in tamer['pets']:
-                species_id = pet['species_id']
-                
-                # Get species info for family and stats
-                species_info = species_data.get(species_id, {})
-                family_name = species_info.get('family_name', 'Beast')
-                
-                # Calculate L25 Rare stats (using simplified formula)
-                level = pet.get('level', 25)
-                quality = pet.get('quality', 4)  # 4 = Rare
-                
-                # Base stats approximation (will be more accurate with real species base stats)
-                base_health = 100
-                base_power = 10
-                base_speed = 10
-                
-                if 'base_stats' in species_info:
-                    base_stats = species_info['base_stats']
-                    base_health = base_stats.get('health', 10)
-                    base_power = base_stats.get('power', 10)
-                    base_speed = base_stats.get('speed', 10)
-                
-                # Level 25 Rare approximation
-                health = int(base_health * 18 + 100) if level == 25 else 1400
-                power = int(base_power * 35) if level == 25 else 280
-                speed = int(base_speed * 35) if level == 25 else 280
-                
-                npc_pet = {
-                    'species_id': species_id,
-                    'name': species_info.get('name', f'Pet {species_id}'),
-                    'family': family_name,
-                    'quality': ['Poor', 'Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'][quality] if quality < 6 else 'Rare',
-                    'health': health,
-                    'power': power,
-                    'speed': speed,
-                    'abilities': pet.get('abilities', [])
-                }
-                
-                encounters_dict[key]['npc_pets'].append(npc_pet)
-        
-        return jsonify(encounters_dict)
+        if os.path.exists('encounters_complete.json'):
+            with open('encounters_complete.json', 'r') as f:
+                encounters = json.load(f)
+            return jsonify(encounters)
+        else:
+            return jsonify({'error': 'encounters_complete.json not found'}), 404
     
-    except FileNotFoundError as e:
-        return jsonify({'error': f'Data file not found: {str(e)}'}), 404
     except Exception as e:
         return jsonify({'error': f'Failed to load encounters: {str(e)}'}), 500
 
@@ -1196,9 +1206,9 @@ def genetic_dashboard():
             encounters = response.json()
     except:
         # Fallback to direct file loading if API not available
-        if os.path.exists('encounters.json'):
-            with open('encounters.json', 'r') as f:
-                encounters = json.load(f)
+        if os.path.exists('encounters_complete.json'):
+            with open('encounters_complete.json', 'r') as f:
+                encounters = json.load(f) # Changed to encounters_complete.json and kept variable name as encounters
     return render_template('genetic.html', encounters=encounters)
 
 @app.route('/genetic-simple')

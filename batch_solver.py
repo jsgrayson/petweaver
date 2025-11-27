@@ -17,18 +17,20 @@ from simulator.strategy_manager import StrategyManager
 def load_data():
     """Load necessary data for simulation"""
     try:
-        with open('encounters.json', 'r') as f:
+        with open('encounters_complete.json', 'r') as f:
             encounters = json.load(f)
         
         with open('abilities.json', 'r') as f:
-            abilities = json.load(f)
+            abilities_root = json.load(f)
+            species_abilities = abilities_root.get('species_abilities', {})
+            ability_stats = abilities_root.get('abilities', {})
             
         # Load manual overrides
         if os.path.exists('ability_stats_manual.json'):
             with open('ability_stats_manual.json', 'r') as f:
                 manual_stats = json.load(f)
                 for aid, data in manual_stats.items():
-                    abilities[aid] = data
+                    ability_stats[aid] = data
         
         species_data = {}
         if os.path.exists('species_data.json'):
@@ -37,19 +39,24 @@ def load_data():
                 species_data = {int(k): v for k, v in species_raw.items()}
                 
         # Load my pets
-        my_pets = []
         if os.path.exists('my_pets.json'):
             with open('my_pets.json', 'r') as f:
                 my_pets = json.load(f)
+        
+        # Load AI priorities
+        npc_priorities = {}
+        if os.path.exists('npc_ai_priorities.json'):
+            with open('npc_ai_priorities.json', 'r') as f:
+                npc_priorities = json.load(f)
                 
-        return encounters, abilities, species_data, my_pets
+        return encounters, species_abilities, ability_stats, species_data, my_pets, npc_priorities
     except Exception as e:
         print(f"Error loading data: {e}")
-        return {}, {}, {}, []
+        return {}, {}, {}, {}, [], {}
 
 def solve_encounter_worker(args):
     """Worker function to solve a single encounter"""
-    encounter_key, encounter_data, abilities, species_data, my_pets, config = args
+    encounter_key, encounter_data, species_abilities, ability_stats, species_data, my_pets, config, priority_script = args
     
     try:
         target_name = encounter_data.get('name', encounter_key)
@@ -113,12 +120,20 @@ def solve_encounter_worker(args):
         target_team = Team(pets=target_pets)
         
         # 2. Setup Evaluator & Engine
+        # Determine if this is a carry battle (check encounter flag)
+        is_carry_battle = encounter_data.get('carry_battle', False) or encounter_data.get('type') == 'daily_leveling'
+        
         evaluator = FitnessEvaluator(
             target_team=target_team,
-            ability_db=abilities,
-            species_db=species_data,
-            target_name=target_name
+            ability_db={},  # Will be monkey-patched below
+            species_db={},  # Will be monkey-patched below
+            target_name=target_name,
+            npc_priorities=priority_script # Pass the specific script (List)
         )
+        
+        # CRITICAL: Store these for slot pool building
+        evaluator.ability_db = ability_stats
+        evaluator.species_db = species_data
         
         # Inject real stats if available (simplified)
         # In a full implementation, we'd pass this in properly
@@ -161,36 +176,73 @@ def solve_encounter_worker(args):
         except: pass
         
         engine.initialize_population(
-            available_species, abilities, 
-            npc_name=target_name, strategy_manager=strategy_manager
+            available_species, species_abilities, 
+            npc_name=target_name, strategy_manager=strategy_manager,
+            is_carry_battle=is_carry_battle
         )
         
+        # Carry Mode: Force Slot 3 to be Level 1 Carry
+        if is_carry_battle:
+            from genetic.genome import PetGene, StrategyGene
+            # print(f"    [Mode] Carry Battle Detected: Forcing Slot 3 to Level 1 Carry.")
+            
+            # Lock Slot 3 so it doesn't get mutated/overwritten
+            engine.locked_slots[2] = True
+            
+            for genome in engine.population:
+                # Create Carry Pet Gene (Species ID -1)
+                carry_gene = PetGene(
+                    species_id=-1,
+                    breed_id=3,
+                    abilities=[],
+                    strategy=StrategyGene()
+                )
+                # Force into 3rd slot (index 2)
+                if len(genome.pets) > 2:
+                    genome.pets[2] = carry_gene
+                else:
+                    genome.pets.append(carry_gene)
+
         # Manually inject seeds if any
         if seed_teams:
             # Convert seed team IDs to Genome
             for seed_ids in seed_teams:
                 try:
                     # seed_ids is [id1, id2, id3]
+                    # Fix for Carry Battles: Ensure slot 3 is -1 if 0
+                    if is_carry_battle and len(seed_ids) >= 3 and seed_ids[2] == 0:
+                        seed_ids[2] = -1
+                        
                     from genetic.genome import TeamGenome
-                    seed_genome = TeamGenome.from_team_ids(seed_ids, abilities)
+                    seed_genome = TeamGenome.from_team_ids(seed_ids, species_abilities)
                     # Replace a random genome in population with seed
                     if engine.population:
                         engine.population[0] = seed_genome # Put seed in front
                 except Exception as e:
                     print(f"Error injecting seed {seed_ids}: {e}")
         
-        # 4. Evolve
+        # 4. Evolve - Run until fully solved (WWW) or max attempts
         best_fitness = 0
         best_genome = None
+        gen = 0
+        max_attempts = config.get('max_generations', 1000)  # Safety limit
         
-        for gen in range(config['generations']):
+        while gen < max_attempts:
             stats = engine.evolve_generation(available_species)
+            gen += 1
+            
             if stats['best_fitness'] > best_fitness:
                 best_fitness = stats['best_fitness']
                 best_genome = stats['top_genomes'][0]
-                
-            # Early exit if good enough
-            if best_fitness > 50000: # Win threshold
+            
+            # Sequential mode: Check if all 3 fights won (WWW status)
+            win_status = stats.get('win_status', 'LLL')
+            if win_status == 'WWW':
+                # SOLVED! All 3 sequential fights won
+                break
+            
+            # Also check high fitness threshold as backup
+            if best_fitness > 50000:
                 break
                 
         # 5. Result
@@ -214,7 +266,7 @@ def solve_encounter_worker(args):
 def run_batch(filter_str=None, pop_size=20, generations=10, processes=4, my_pets_only=True):
     print(f"🚀 Starting Batch Solver (Processes: {processes})")
     
-    encounters, abilities, species_data, my_pets = load_data()
+    encounters, species_abilities, ability_stats, species_data, my_pets, npc_priorities = load_data()
     
     # Filter encounters
     tasks = []
@@ -222,12 +274,29 @@ def run_batch(filter_str=None, pop_size=20, generations=10, processes=4, my_pets
         if filter_str and filter_str.lower() not in key.lower() and filter_str.lower() not in data.get('name', '').lower():
             continue
         
+        # Extract relevant priority script
+        priority_script = None
+        npc_pets = data.get('pets') or data.get('npc_pets')
+        if npc_pets:
+            # Construct key: "id1,id2,id3"
+            # Note: We need to handle the case where species_id is missing or 0
+            # This logic mimics what solve_encounter_worker does to build the team
+            # But we do a lightweight version here just to find the key
+            try:
+                ids = []
+                for p in npc_pets:
+                    sid = p.get('species_id', 0)
+                    ids.append(str(sid))
+                team_key = ",".join(ids)
+                priority_script = npc_priorities.get(team_key)
+            except: pass
+
         config = {
             'pop_size': pop_size,
             'generations': generations,
             'my_pets_only': my_pets_only
         }
-        tasks.append((key, data, abilities, species_data, my_pets, config))
+        tasks.append((key, data, species_abilities, ability_stats, species_data, my_pets, config, priority_script))
         
     print(f"📋 Found {len(tasks)} encounters to solve.")
     

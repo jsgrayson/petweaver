@@ -70,7 +70,7 @@ class SpecialEncounterHandler:
         if gore_buff:
             # Increase stacks
             gore_buff.stacks += 1
-            gore_buff.magnitude += 10  # +10 damage per stack
+            # gore_buff.magnitude += 10  # REMOVED: BuffTracker multiplies by stacks automatically
         else:
             # Create new Gore Stack
             gore_buff = Buff(

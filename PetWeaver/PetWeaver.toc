@@ -25,3 +25,4 @@ PetWeaverMinimap.lua
 PetWeaverQueue.lua
 PetWeaverQueueUI.lua
 PetWeaverEnemyRecorder.lua
+PetWeaverScanner.lua

@@ -37,15 +37,26 @@ class EvolutionEngine:
         if defn in strong_map_09.get(att, {}): return 1.5
         return 1.0
 
-    def build_slot_pools(self, available_species, ability_db):
+    def build_slot_pools(self, available_species, ability_db, is_carry_battle=False):
         """Builds optimized pools for each specific 1v1 fight."""
         enemy_team = getattr(self.evaluator, 'target_team', None)
         species_db = getattr(self.evaluator, 'species_db', {})
         ability_info_db = getattr(self.evaluator, 'ability_db', {})
         
         # Synergy Enablers: Abilities that make the whole team better
-        # Black Claw (919), Flock (581), Swarm (706), Hunting Party (921), Wild Magic (593), Supercharge (208), Howl (362)
-        SYNERGY_ABILITIES = {919, 581, 706, 921, 593, 208, 362}
+        # Priority order: Haunt first (most important), then damage amplifiers, then multi-hit
+        SYNERGY_ABILITIES = {
+            279,  # Haunt (Undead) - THE meta ability, DoT persists after death
+            919,  # Black Claw (increases damage taken by 100%)
+            581,  # Flock (multi-hit that synergizes with Black Claw)
+            362,  # Howl (team-wide damage boost)
+            492,  # Illusionary Barrier (strong defensive setup)
+            706,  # Swarm (DoT + debuff)
+            921,  # Hunting Party (team damage boost)
+            593,  # Moonfire/Wild Magic (good for cleave)
+            208,  # Supercharge (burst damage setup)
+            284,  # Curse of Doom (execute mechanic)
+        }
         synergy_pets = []
         
         # Pre-scan for synergy pets
@@ -58,7 +69,13 @@ class EvolutionEngine:
         if not enemy_team: return
         self.slot_pools = [[], [], []]
         
-        print("    [AI] Building 1v1 Counter Pools...")
+        if not enemy_team: return
+        self.slot_pools = [[], [], []]
+        
+        print(f"    [AI] Building {'Carry' if is_carry_battle else '1v1'} Counter Pools...")
+        
+        # For Carry Battles, we need a unified pool of strong pets for slots 1 & 2
+        carry_pool = set()
         
         for i, enemy_pet in enumerate(enemy_team.pets):
             counters = []
@@ -94,21 +111,36 @@ class EvolutionEngine:
             counters = list(set(counters + synergy_pets))
             
             if not counters: counters = available_species 
-            self.slot_pools[i] = counters
-            print(f"    [AI] Fight {i+1} Pool: {len(counters)} candidates (inc. {len(synergy_pets)} synergy).")
+            
+            if is_carry_battle:
+                # Add to unified carry pool
+                carry_pool.update(counters)
+            else:
+                self.slot_pools[i] = counters
+                print(f"    [AI] Fight {i+1} Pool: {len(counters)} candidates (inc. {len(synergy_pets)} synergy).")
 
-    def initialize_population(self, available_species, ability_db, npc_name=None, strategy_manager=None, capture_mode=False):
+        if is_carry_battle:
+            # Assign unified pool to slots 1 and 2
+            # Slot 3 is the carry pet (handled by locking, but pool should be empty or irrelevant)
+            final_pool = list(carry_pool)
+            self.slot_pools[0] = final_pool
+            self.slot_pools[1] = final_pool
+            self.slot_pools[2] = [] # Should be locked anyway
+            print(f"    [AI] Carry Pool (Slots 1&2): {len(final_pool)} candidates.")
+
+    def initialize_population(self, available_species, ability_db, npc_name=None, strategy_manager=None, capture_mode=False, is_carry_battle=False):
         self.available_species = available_species
         self.ability_db = ability_db
         self.population = []
-        self.build_slot_pools(available_species, ability_db)
+        self.build_slot_pools(available_species, ability_db, is_carry_battle=is_carry_battle)
         self.locked_slots = [False, False, False]
         
         # Initial Draft: Random picks from the correct pools
         for _ in range(self.pop_size):
             p1 = random.choice(self.slot_pools[0])
             p2 = random.choice(self.slot_pools[1])
-            p3 = random.choice(self.slot_pools[2])
+            # For carry battles, p3 will be overwritten, but we need a valid ID for now
+            p3 = random.choice(self.slot_pools[2]) if self.slot_pools[2] else random.choice(available_species)
             genome = TeamGenome.from_team_ids([p1, p2, p3], ability_db)
             self.population.append(genome)
         self.generation = 0
@@ -119,7 +151,8 @@ class EvolutionEngine:
             if genome.fitness == 0:
                 genome.fitness = self.evaluator.evaluate(genome)
         
-        self.population.sort(key=lambda g: g.fitness, reverse=True)
+        # Sort by Win Rate then Fitness
+        self.population.sort(key=lambda g: (getattr(g, 'stats', {}).get('win_rate', 0), g.fitness), reverse=True)
         
         # Update Best (Always trust the latest run to catch regressions)
         self.best_genome = copy.deepcopy(self.population[0])
@@ -216,4 +249,4 @@ class EvolutionEngine:
     def _tournament_select(self, k=3):
         """Select the best individual from k random picks"""
         tournament = random.sample(self.population, k)
-        return max(tournament, key=lambda g: g.fitness)
+        return max(tournament, key=lambda g: (getattr(g, 'stats', {}).get('win_rate', 0), g.fitness))

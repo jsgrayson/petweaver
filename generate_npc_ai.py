@@ -18,8 +18,11 @@ def normalize_name(name):
 def generate_npc_ai():
     print("Loading data...")
     
-    with open('encounters_full.json', 'r') as f:
-        encounters = json.load(f)
+    with open('encounters_complete.json', 'r') as f:
+        encounters_dict = json.load(f)
+        # Convert dict to list if needed, or handle dict
+        # encounters_complete is dict: key -> data
+        encounters = list(encounters_dict.values())
         
     try:
         with open('strategies_enhanced.json', 'r') as f:
@@ -71,7 +74,12 @@ def generate_npc_ai():
                             break
                 
                 if not matched_tamer:
+                    # print(f"No match for {enc_name}")
                     continue
+                
+                # Debug print for Squirt
+                if 'squirt' in matched_tamer['name'].lower():
+                    print(f"DEBUG: Found Squirt! Analyzing strategy...")
                 
                 matched_encounters.add(matched_tamer['name'])
                 
@@ -97,12 +105,20 @@ def generate_npc_ai():
                         target_indices = []
                         if pet_idx_str:
                             target_indices = [int(pet_idx_str) - 1]
+                        # Get pets list (handle both keys)
+                        tamer_pets = matched_tamer.get('npc_pets') or matched_tamer.get('pets', [])
+                        
+                        target_indices = []
+                        if pet_idx_str:
+                            target_indices = [int(pet_idx_str) - 1]
                         else:
-                            target_indices = range(len(matched_tamer['pets']))
+                            target_indices = range(len(tamer_pets))
                             
                         for idx in target_indices:
-                            if idx < len(matched_tamer['pets']):
+                            if idx < len(tamer_pets):
                                 npc_ability_counts[matched_tamer['name']][idx][ability_ref] += 1
+                                if 'squirt' in matched_tamer['name'].lower():
+                                    print(f"DEBUG: Squirt usage: Pet {idx} used {ability_ref}")
 
                     # Regex for enemy aura checks: enemy.aura(ID)
                     aura_matches = re.finditer(r'enemy(?:\(#(\d+)\))?\.aura\(([^)]+)\)', script)
@@ -113,11 +129,17 @@ def generate_npc_ai():
                         target_indices = []
                         if pet_idx_str:
                             target_indices = [int(pet_idx_str) - 1]
+                        # Get pets list (handle both keys)
+                        tamer_pets = matched_tamer.get('npc_pets') or matched_tamer.get('pets', [])
+
+                        target_indices = []
+                        if pet_idx_str:
+                            target_indices = [int(pet_idx_str) - 1]
                         else:
-                            target_indices = range(len(matched_tamer['pets']))
+                            target_indices = range(len(tamer_pets))
                             
                         for idx in target_indices:
-                            if idx < len(matched_tamer['pets']):
+                            if idx < len(tamer_pets):
                                 npc_ability_counts[matched_tamer['name']][idx][aura_ref] += 1
 
     print(f"Processed {total_strategies} strategies.")
@@ -138,10 +160,15 @@ def generate_npc_ai():
         
         tamer_priorities = {}
         
-        for pet_idx, counts in pets_data.items():
-            if pet_idx >= len(real_tamer_data['pets']): continue
+        tamer_pets = real_tamer_data.get('npc_pets') or real_tamer_data.get('pets', [])
+        
+        if 'squirt' in tamer_name.lower():
+            print(f"DEBUG: Processing Squirt priorities. Pets data: {len(pets_data)}")
             
-            pet = real_tamer_data['pets'][pet_idx]
+        for pet_idx, counts in pets_data.items():
+            if pet_idx >= len(tamer_pets): continue
+            
+            pet = tamer_pets[pet_idx]
             pet_abilities = pet.get('abilities', [])
             
             # Resolve references (names/IDs) to actual Ability IDs this pet has

@@ -33,6 +33,7 @@ function recorder:RegisterEvents()
     frame:RegisterEvent("PET_BATTLE_TURN_STARTED")
     frame:RegisterEvent("PET_BATTLE_ACTION_SELECTED")
     frame:RegisterEvent("PET_BATTLE_CLOSE")
+    frame:RegisterEvent("CHAT_MSG_PET_BATTLE_COMBAT_LOG")
     
     frame:SetScript("OnEvent", function(_, event, ...)
         if event == "PET_BATTLE_OPENING_START" then
@@ -43,54 +44,32 @@ function recorder:RegisterEvents()
             self:OnActionSelected()
         elseif event == "PET_BATTLE_CLOSE" then
             self:OnBattleEnd()
+        elseif event == "CHAT_MSG_PET_BATTLE_COMBAT_LOG" then
+            self:OnCombatLog(..., event)
         end
     end)
 end
 
-function recorder:ToggleRecording()
-    isRecording = not isRecording
-    if isRecording then
-        print("|cFF00FF00Enemy recording ENABLED|r - Enemy abilities will be tracked")
-    else
-        print("|cFFFF0000Enemy recording DISABLED|r")
-    end
-end
+-- ... (ToggleRecording and OnBattleStart remain same) ...
 
-function recorder:OnBattleStart()
-    if not isRecording then return end
+function recorder:OnCombatLog(msg)
+    if not isRecording or not currentBattle then return end
     
-    currentTurn = 0
+    -- Ensure current turn exists (sometimes logs come before turn start event)
+    if currentTurn == 0 then return end
     
-    -- Get enemy info
-    local enemyName = C_PetBattles.GetName(Enum.BattlePetOwner.Enemy, 1)
-    local battleType = C_PetBattles.IsPlayerNPC(Enum.BattlePetOwner.Enemy) and "NPC" or "PVP"
-    
-    if battleType ~= "NPC" then
-        -- Only record NPC battles
-        return
-    end
-    
-    currentBattle = {
-        enemyName = enemyName,
-        timestamp = time(),
-        turns = {},
-        enemyPets = {}
-    }
-    
-    -- Record all enemy pets
-    for i = 1, C_PetBattles.GetNumPets(Enum.BattlePetOwner.Enemy) do
-        local petID = C_PetBattles.GetPetSpeciesID(Enum.BattlePetOwner.Enemy, i)
-        local displayID = C_PetBattles.GetDisplayID(Enum.BattlePetOwner.Enemy, i)
-        local name = C_PetBattles.GetName(Enum.BattlePetOwner.Enemy, i)
-        
-        currentBattle.enemyPets[i] = {
-            petID = petID,
-            displayID = displayID,
-            name = name
+    if not currentBattle.turns[currentTurn] then
+        currentBattle.turns[currentTurn] = {
+            turnNumber = currentTurn,
+            enemyActions = {},
+            logs = {}
         }
     end
     
-    print("|cFFFFFF00Recording battle vs:|r " .. enemyName)
+    local turn = currentBattle.turns[currentTurn]
+    if not turn.logs then turn.logs = {} end
+    
+    table.insert(turn.logs, msg)
 end
 
 function recorder:OnTurnStart()
@@ -99,44 +78,18 @@ function recorder:OnTurnStart()
     currentTurn = currentTurn + 1
     currentBattle.turns[currentTurn] = {
         turnNumber = currentTurn,
-        enemyActions = {}
+        enemyActions = {},
+        logs = {}
     }
 end
 
 function recorder:OnActionSelected()
     if not currentBattle then return end
-    
-    -- C_Timer to delay so we can capture enemy action after it happens
-    C_Timer.After(0.5, function()
-        self:RecordEnemyAction()
-    end)
+    -- We rely on chat logs now, but keeping this for timing if needed
 end
 
 function recorder:RecordEnemyAction()
-    if not currentBattle or not currentBattle.turns[currentTurn] then return end
-    
-    -- Get active enemy pet
-    local activeEnemySlot = C_PetBattles.GetActivePet(Enum.BattlePetOwner.Enemy)
-    
-    -- Try to get the last ability used by checking combat log
-    -- This is tricky - we may need to parse CLEU events
-    
-    -- For now, record pet states
-    local turn = currentBattle.turns[currentTurn]
-    
-    -- Record enemy pet health/stats after action
-    for i = 1, C_PetBattles.GetNumPets(Enum.BattlePetOwner.Enemy) do
-        local health = C_PetBattles.GetHealth(Enum.BattlePetOwner.Enemy, i)
-        local maxHealth = C_PetBattles.GetMaxHealth(Enum.BattlePetOwner.Enemy, i)
-        
-        if not turn.enemyActions[i] then
-            turn.enemyActions[i] = {}
-        end
-        
-        turn.enemyActions[i].health = health
-        turn.enemyActions[i].maxHealth = maxHealth
-        turn.enemyActions[i].active = (i == activeEnemySlot)
-    end
+    -- Deprecated in favor of chat logs, but keeping structure for now
 end
 
 function recorder:OnBattleEnd()

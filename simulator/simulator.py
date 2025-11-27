@@ -116,7 +116,7 @@ class BattleSimulator:
         if enemy_pet: enemy_pet.tick_cooldowns()
         
         # Process end of turn AFTER all actions complete
-        self.process_end_of_turn(state, state.player_team.get_active_pet(), state.enemy_team.get_active_pet())
+        self.process_end_of_turn(state, state.player_team.get_active_pet(), state.enemy_team.get_active_pet(), special_encounter_id)
         
         state.turn_number = turn_number + 1
         return state
@@ -327,7 +327,7 @@ class BattleSimulator:
                 self.buff_tracker.add_buff(defender, buff)
             self.log.add_event({'type': 'buff_applied', 'target': defender.name, 'buff': 'Shattered Defenses', 'turn': turn_number})
 
-    def process_end_of_turn(self, state, p1, p2):
+    def process_end_of_turn(self, state, p1, p2, special_encounter_id=None):
         """
         Process end-of-turn effects in STRICT order:
         1. Weather damage
@@ -336,6 +336,13 @@ class BattleSimulator:
         4. HoT healing (only if alive)
         5. Buff duration decrement
         """
+        # 0. Special Encounter Mechanics (Start of End Phase)
+        if special_encounter_id == 'gore_stacks':
+            # Apply Gore Stacks to player's pet (p1 is usually player if called with player_pet first)
+            # We assume p1 is player pet based on call in execute_turn
+            if p1 and p1.stats.is_alive():
+                SpecialEncounterHandler.apply_gorespine_gore(p1, state.turn_number)
+
         for p in [p1, p2]:
             if not p:
                 continue

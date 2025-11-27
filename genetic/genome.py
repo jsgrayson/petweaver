@@ -79,7 +79,7 @@ class TeamGenome:
         for species_id in species_picks:
             # Get abilities for this species (mock for now)
             # In real impl, look up in ability_db
-            possible_abilities = ability_db.get(species_id, [1, 2, 3, 4, 5, 6])
+            possible_abilities = ability_db.get(str(species_id)) or ability_db.get(species_id, [1, 2, 3, 4, 5, 6])
             
             # Pick one for each slot safely
             selected_abilities = cls._select_valid_abilities(possible_abilities)
@@ -111,7 +111,8 @@ class TeamGenome:
             if species_id == 0: continue # Skip empty slots
             
             # Get valid abilities
-            possible_abilities = ability_db.get(species_id, [1, 2, 3, 4, 5, 6])
+            # Get valid abilities
+            possible_abilities = ability_db.get(str(species_id)) or ability_db.get(species_id, [1, 2, 3, 4, 5, 6])
             if isinstance(possible_abilities, dict):
                 possible_abilities = possible_abilities.get('abilities', [])
             selected_abilities = cls._select_valid_abilities(possible_abilities)
@@ -136,7 +137,8 @@ class TeamGenome:
                 new_species = random.choice(available_species)
                 
                 # Get valid abilities for new species
-                possible_abilities = ability_db.get(new_species, [1, 2, 3, 4, 5, 6])
+                # Get valid abilities for new species
+                possible_abilities = ability_db.get(str(new_species)) or ability_db.get(new_species, [1, 2, 3, 4, 5, 6])
                 
                 # Pick valid abilities safely
                 new_abilities = self._select_valid_abilities(possible_abilities)
@@ -163,7 +165,9 @@ class TeamGenome:
             if random.random() < mutation_rate:
                 # Swap an ability choice (e.g. slot 1 option A -> B)
                 pet = self.pets[i]
-                possible_abilities = ability_db.get(pet.species_id, [1, 2, 3, 4, 5, 6])
+                # Swap an ability choice (e.g. slot 1 option A -> B)
+                pet = self.pets[i]
+                possible_abilities = ability_db.get(str(pet.species_id)) or ability_db.get(pet.species_id, [1, 2, 3, 4, 5, 6])
                 
                 # Pick a random slot to flip (0, 1, or 2)
                 slot = random.randint(0, 2)
@@ -175,7 +179,8 @@ class TeamGenome:
                 idx1 = slot
                 idx2 = slot + 3
                 
-                if len(possible_abilities) > idx2:
+                # Bounds check: ensure pet has enough abilities and slot is valid
+                if len(pet.abilities) > slot and len(possible_abilities) > idx2:
                     # Toggle between the two options
                     current = pet.abilities[slot]
                     option1 = possible_abilities[idx1]
@@ -183,7 +188,7 @@ class TeamGenome:
                     
                     if current == option1:
                         pet.abilities[slot] = option2
-                    else:
+                    elif current == option2:
                         pet.abilities[slot] = option1
                     mutated = True
                 
