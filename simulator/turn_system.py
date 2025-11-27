@@ -88,9 +88,9 @@ class TurnSystem:
             enemy_priority = enemy_action.ability.priority
             
         # DEBUG: Print priorities
-        print(f"DEBUG: Turn Order Check - Player Prio: {player_priority}, Enemy Prio: {enemy_priority}")
-        if player_action.ability: print(f"DEBUG: Player Ability: {player_action.ability.name} (Prio: {player_action.ability.priority})")
-        if enemy_action.ability: print(f"DEBUG: Enemy Ability: {enemy_action.ability.name} (Prio: {enemy_action.ability.priority})")
+        # print(f"DEBUG: Turn Order Check - Player Prio: {player_priority}, Enemy Prio: {enemy_priority}")
+        # if player_action.ability: print(f"DEBUG: Player Ability: {player_action.ability.name} (Prio: {player_action.ability.priority})")
+        # if enemy_action.ability: print(f"DEBUG: Enemy Ability: {enemy_action.ability.name} (Prio: {enemy_action.ability.priority})")
         
         if player_priority > enemy_priority:
             return [player_tuple, enemy_tuple]

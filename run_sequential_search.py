@@ -26,21 +26,26 @@ with open('species_data.json') as f:
 
 # Boss team (Major Payne)
 def create_boss_team():
+    # Grizzle abilities from abilities.json
     grizzle = Pet(979, "Grizzle", PetFamily.BEAST, PetQuality.EPIC, 
                   PetStats(1700, 1700, 320, 270), [
-        Ability(1, "Bash", 25, 100, 0, 0, PetFamily.BEAST),
-        Ability(2, "Hibernate", 0, 100, 0, 4, PetFamily.BEAST),
-        Ability(3, "Rampage", 35, 95, 0, 0, PetFamily.BEAST)])
+        Ability(id=348, name="Bash", power=20, accuracy=100, speed=0, cooldown=5, family=PetFamily.BEAST, hits=1),
+        Ability(id=133, name="Hibernate", power=0, accuracy=100, speed=0, cooldown=4, family=PetFamily.BEAST, is_heal=True),
+        Ability(id=124, name="Rampage", power=20, accuracy=100, speed=0, cooldown=3, family=PetFamily.BEAST, hits=3)])
+    
+    # Beakmaster abilities from abilities.json  
     beakmaster = Pet(978, "Beakmaster", PetFamily.MECHANICAL, PetQuality.EPIC,
                      PetStats(1500, 1500, 290, 300), [
-        Ability(4, "Batter", 10, 100, 0, 0, PetFamily.MECHANICAL),
-        Ability(5, "Shock and Awe", 25, 100, 0, 3, PetFamily.MECHANICAL),
-        Ability(6, "Wind-Up", 50, 90, 0, 2, PetFamily.MECHANICAL)])
+        Ability(id=393, name="Batter", power=20, accuracy=100, speed=0, cooldown=0, family=PetFamily.MECHANICAL, hits=1),
+        Ability(id=646, name="Shock and Awe", power=20, accuracy=100, speed=0, cooldown=4, family=PetFamily.MECHANICAL, hits=1),
+        Ability(id=459, name="Wind-Up", power=20, accuracy=100, speed=0, cooldown=0, family=PetFamily.MECHANICAL, hits=2)])
+    
+    # Bloom abilities from abilities.json
     bloom = Pet(977, "Bloom", PetFamily.ELEMENTAL, PetQuality.EPIC,
                 PetStats(1400, 1400, 340, 250), [
-        Ability(7, "Lash", 20, 100, 0, 0, PetFamily.ELEMENTAL),
-        Ability(8, "Soothing Mists", 0, 100, 0, 3, PetFamily.ELEMENTAL),
-        Ability(9, "Entangling Roots", 15, 100, 0, 4, PetFamily.ELEMENTAL)])
+        Ability(id=350, name="Lash", power=20, accuracy=100, speed=0, cooldown=0, family=PetFamily.ELEMENTAL, hits=1),
+        Ability(id=335, name="Soothing Mists", power=20, accuracy=100, speed=0, cooldown=3, family=PetFamily.ELEMENTAL, is_heal=True),
+        Ability(id=572, name="Entangling Roots", power=20, accuracy=100, speed=0, cooldown=4, family=PetFamily.ELEMENTAL, hits=1)])
     return Team([grizzle, beakmaster, bloom])
 
 target_team = create_boss_team()

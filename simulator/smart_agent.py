@@ -120,3 +120,50 @@ class SmartAgent:
                     best_dmg = ab.power
                     best = ab
         return best
+
+
+def create_smart_enemy_agent(difficulty: float = 1.0, ability_priorities: Optional[Dict[int, List[int]]] = None):
+    """
+    Create an enemy agent with optional ability priority synergy.
+    
+    Args:
+        difficulty: AI difficulty (not currently used, kept for compatibility)
+        ability_priorities: Dict mapping pet_index -> list of ability IDs in priority order
+                           e.g., {1: [6, 5]} means Beakmaster should prefer Wind-Up (6) over Shock and Awe (5)
+    
+    Returns:
+        A decision function that can be passed to create_npc_agent
+    """
+    base_agent = SmartAgent(difficulty=difficulty, actor_id='enemy')
+    
+    if not ability_priorities:
+        # No priorities = use base SmartAgent
+        return base_agent.decide
+    
+    def synergy_decide(state: BattleState) -> TurnAction:
+        """Enhanced decision with ability synergy priorities"""
+        # Use base agent for survival/strategy layers
+        action = base_agent._level_1_survival(state)
+        if action: return action
+        
+        action = base_agent._level_2_strategy(state)
+        if action: return action
+        
+        # Custom Level 3: Apply priority-based synergy
+        active_pet = state.enemy_team.get_active_pet()
+        if not active_pet: return TurnAction('enemy', 'pass')
+        
+        pet_idx = state.enemy_team.active_pet_index
+        priority_list = ability_priorities.get(pet_idx, [])
+        
+        if priority_list:
+            # Try abilities in priority order (for combos like Wind-Up -> Shock and Awe)
+            for ability_id in priority_list:
+                for ab in active_pet.abilities:
+                    if ab.id == ability_id and active_pet.can_use_ability(ab):
+                        return TurnAction('enemy', 'ability', ability=ab)
+        
+        # Fallback to base damage logic
+        return base_agent._level_3_damage(state)
+    
+    return synergy_decide

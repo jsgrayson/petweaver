@@ -97,14 +97,20 @@ class DamageCalculator:
         
         # Check dodge buffs on defender
         dodge_chance = 0.0
-        print(f"DEBUG: Checking buffs on {defender.name} (ID: {id(defender)}). Buff count: {len(defender.active_buffs)}")
+        # if ability.name == "Rampage":
+        #     print(f"\n=== RAMPAGE CHECK ===")
+        #     print(f"Defender: {defender.name}, Active buffs: {[b.name for b in defender.active_buffs]}")
+        #     for b in defender.active_buffs:
+        #         print(f"  Buff: {b.name}, Type: {b.type}, Duration: {b.duration}")
+        
         for buff in defender.active_buffs:
             # DEBUG: Print buffs
-            print(f"DEBUG: Checking buff {buff.name} (Type: {buff.type}) on {defender.name}")
+            #print(f"DEBUG: Checking buff {buff.name} (Type: {buff.type}) on {defender.name}")
             if buff.type == BuffType.STAT_MOD and buff.stat_affected == 'dodge':
                 dodge_chance += buff.magnitude
             elif buff.type == BuffType.INVULNERABILITY:
-                print(f"DEBUG: {defender.name} is INVULNERABLE due to {buff.name}!")
+                # if ability.name == "Rampage":
+                #     print(f"  → INVULNERABILITY DETECTED! Returning False")
                 return False
         
         # Check weather accuracy modifiers

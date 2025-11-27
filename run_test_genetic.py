@@ -24,7 +24,7 @@ try:
 except FileNotFoundError:
     species_db = {}
 
-# --- 2. Boss Team ---
+# --- 2. Boss Team (Major Payne) ---
 def create_boss_team():
     grizzle = Pet(979, "Grizzle (Boss)", PetFamily.BEAST, PetQuality.EPIC, PetStats(1700, 1700, 320, 270), [
         Ability(1, "Bash", 25, 100, 0, 0, PetFamily.BEAST),
@@ -45,41 +45,17 @@ print(f"Target: Major Payne (3 Epic Pets)")
 
 # --- 3. Evolution Setup ---
 evaluator = FitnessEvaluator(target_team, abilities_db, species_db, target_name="Major Payne")
-engine = EvolutionEngine(evaluator, population_size=100, mutation_rate=0.95, elitism_rate=0.1)  # High mutation for max diversity
+# Mutation Rate 0.5 = Aggressive search for counters
+engine = EvolutionEngine(evaluator, population_size=100, mutation_rate=0.5, elitism_rate=0.1)
 available_species = list(species_abilities.keys())
 
-# Meta Team: Iron Starlette (1155), Fel Flame (845), Emperor Crab (1194)
-meta_seed = [1155, 845, 1194]
+print("Initializing Population (Smart Draft)...")
+engine.initialize_population(available_species, species_abilities, npc_name="Major Payne")
 
-# Try loading Xu-Fu seeds
-xufu_seeds = []
-try:
-    with open('xufu_seed_teams.json') as f:
-        seed_data = json.load(f)
-        # Look for Major Payne specifically
-        for enc_name, teams in seed_data.items():
-            if 'payne' in enc_name.lower() or 'major' in enc_name.lower():
-                xufu_seeds = teams[:5]  # Take top 5 Xu-Fu teams
-                print(f"✓ Loaded {len(xufu_seeds)} Xu-Fu seed teams for {enc_name}")
-                break
-except FileNotFoundError:
-    print("ℹ No Xu-Fu seeds found (run run_full_scrape.py to generate)")
-
-# Combine all seeds
-all_seeds = [meta_seed] + xufu_seeds
-
-print("Initializing Population (Smart Draft + Seeds)...")
-engine.initialize_population(
-    list(species_db.keys()),
-    species_abilities,
-    seed_teams=all_seeds,
-    strategy_file=None  # Already loaded seeds manually above
-)
-
-print("\nStarting UNLIMITED Evolution (Press Ctrl+C to stop)...")
+# --- 4. Infinite Simulation ---
+print("\nStarting UNLIMITED Sequential Search (Press Ctrl+C to stop)...")
 start_time = time.time()
 gen = 0
-prev_team = None
 
 try:
     while True:
@@ -88,52 +64,37 @@ try:
         best = result['best_fitness']
         status = result.get('win_status', '???')
         
-        top = result['top_genomes'][0]
-        names = [species_db.get(str(p.species_id), {}).get('name', str(p.species_id)) for p in top.pets]
-        current_team = tuple(names)  # Convert to tuple for comparison
-        
-        # Check if team changed
-        team_changed = (current_team != prev_team) if prev_team else True
-        
-        if gen == 1 or gen % 10 == 0 or best > 14000 or team_changed:
-            change_marker = "→ NEW" if team_changed and gen > 1 else ""
-            print(f"\nGen {gen}: {best:.0f} ({status}) | Team: {names} {change_marker}")
-            prev_team = current_team
+        if gen == 1 or gen % 10 == 0 or best > 14000:
+            top = result['top_genomes'][0]
+            names = [species_db.get(str(p.species_id), {}).get('name', str(p.species_id)) for p in top.pets]
+            print(f"\nGen {gen}: {best:.0f} ({status}) | Team: {names}")
         else:
             print(f"{best:.0f}", end=" | ", flush=True)
 
-        # Score > 15,000 means Consistent Wins (due to num_battles=3)
+        # Victory Condition
         if best > 15000: 
             print(f"\n\nVICTORY DETECTED at Generation {gen}!")
             break
 
-
 except KeyboardInterrupt:
     print("\n\nSimulation stopped by user.")
 
-# --- 5. REPLAY & VERIFY ---
-print("\n--- VERIFYING VICTORY (Hunting for Winning Seed) ---")
-final_result = {}
-attempts = 0
-success = False
+total_time = time.time() - start_time
+print(f"\nTotal Generations: {gen}")
+print(f"Total Time: {total_time:.2f}s")
+print(f"Final Best Score: {engine.best_genome.fitness:.2f}")
 
-# Try 20 times to find the seed where it wins
-while attempts < 20:
-    attempts += 1
+# --- 5. REPLAY & EXPORT ---
+if engine.best_genome:
+    print("\n--- BEST STRATEGY FOUND ---")
     final_result = evaluator.play_battle(engine.best_genome)
+    print(f"Result: {final_result['winner'].upper()} (Turns: {final_result['turns']})")
+    
     if final_result['winner'] == 'player':
-        print(f"Verified WIN on attempt {attempts}!")
-        success = True
-        break
+        print("\n--- TD SCRIPT ---")
+        script = TDScriptGenerator.generate_script(final_result['events'])
+        print(script)
+        print("---------------------------")
     else:
-        print(f"Attempt {attempts} failed (Bad RNG). Retrying...")
-
-if success:
-    print(f"\nResult: {final_result['winner'].upper()} (Turns: {final_result['turns']})")
-    print("\n--- TD SCRIPT ---")
-    script = TDScriptGenerator.generate_script(final_result['events'])
-    print(script)
-else:
-    print("\n[WARNING] Could not reproduce victory. Strategy might be unstable.")
-
-print("---------------------------")
+        print("\n[WARNING] Verify failed. The strategy might be RNG-dependent.")
+EOF

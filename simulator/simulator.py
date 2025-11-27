@@ -1,10 +1,9 @@
 from typing import List, Dict, Optional, Union, Callable
-from .battle_state import BattleState, Team, Pet, Ability, Buff, BuffType, PetFamily, TurnAction
+from .battle_state import BattleState, TurnAction, BuffType
 from .damage_calculator import DamageCalculator
 from .turn_system import TurnSystem
 from .buff_tracker import BuffTracker
 from .special_encounters import SpecialEncounterHandler
-from .racial_passives import RacialPassives
 
 class BattleLog:
     def __init__(self):
@@ -15,31 +14,7 @@ class BattleLog:
     def add_turn_summary(self, turn: int, summary: str):
         self.turn_summaries.append(f"Turn {turn}: {summary}")
     def get_full_log(self) -> str:
-        log_lines = []
-        current_turn = 0
-        for event in self.events:
-            turn = event.get('turn', 0)
-            if turn != current_turn:
-                log_lines.append(f"--- Turn {turn} ---")
-                current_turn = turn
-            
-            etype = event.get('type')
-            actor = event.get('actor', 'Unknown')
-            if etype == 'damage':
-                log_lines.append(f"{actor} used {event.get('ability')} for {event.get('amount')} damage")
-            elif etype == 'heal':
-                log_lines.append(f"{actor} used {event.get('ability')} for {event.get('amount')} healing")
-            elif etype == 'buff_applied':
-                log_lines.append(f"{event.get('target')} gained {event.get('buff')}")
-            elif etype == 'death':
-                log_lines.append(f"{event.get('pet')} died!")
-            elif etype == 'swap':
-                log_lines.append(f"{actor} swapped to {event.get('new_index')}")
-            elif etype == 'miss':
-                log_lines.append(f"{actor} used {event.get('ability')} but MISSED")
-            else:
-                log_lines.append(str(event))
-        return "\n".join(log_lines)
+        return "\n".join(self.turn_summaries)
 
 class NullLog:
     def __init__(self): self.events = [] 
@@ -67,7 +42,7 @@ class BattleSimulator:
             player_action = self._get_action(player_script, state, turn, 'player')
             enemy_action = self._get_action(enemy_script, state, turn, 'enemy')
             
-            # AUTO-CORRECT: Force swap if dead
+            # VALIDATE DEATH SWAPS
             player_action = self._validate_action(state.player_team, player_action, 'player')
             enemy_action = self._validate_action(state.enemy_team, enemy_action, 'enemy')
             
@@ -80,25 +55,27 @@ class BattleSimulator:
     def _validate_action(self, team, action, actor):
         active = team.get_active_pet()
         if not active or not active.stats.is_alive():
+            # FORCE SWAP ON DEATH
             for i, p in enumerate(team.pets):
-                if p.stats.is_alive(): return TurnAction(actor=actor, action_type='swap', target_pet_index=i)
+                if p.stats.is_alive():
+                    # Log the forced swap so we know WHY it happened
+                    if isinstance(self.log, BattleLog):
+                        # self.log.add_event({'type': 'info', 'msg': f"{actor} forced to swap (Active Dead)"})
+                        pass
+                    return TurnAction(actor=actor, action_type='swap', target_pet_index=i)
             return TurnAction(actor=actor, action_type='pass')
         return action
 
     def _get_action(self, script, state, turn, actor):
         if callable(script):
             try: return script(state)
-            except Exception as e:
-                print(f"Agent Error ({actor}): {e}")
-                import traceback
-                traceback.print_exc()
-                return TurnAction(actor=actor, action_type='pass')
+            except: return TurnAction(actor=actor, action_type='pass')
         else:
             idx = min(turn - 1, len(script) - 1)
             return script[idx]
     
     def execute_turn(self, state, player_action, enemy_action, turn_number, special_encounter_id=None):
-        # self.process_end_of_turn(state, state.player_team.get_active_pet(), state.enemy_team.get_active_pet())
+        # DO NOT process_end_of_turn here - buffs must persist through the turn!
         if state.is_battle_over(): return state
         
         player_pet = state.player_team.get_active_pet()
@@ -120,20 +97,31 @@ class BattleSimulator:
             if not attacker.stats.is_alive() and action.action_type != 'swap': continue
             if not defender.stats.is_alive() and action.action_type == 'ability': continue 
 
+            # print(f"\n[EXEC] {actor} action: {action.action_type} {action.ability.name if action.ability else ''}")
+            # if actor == 'player':
+            #     print(f"  Player buffs BEFORE action: {[b.name for b in attacker.active_buffs]}")
+            # else:
+            #     enemy_acting_on = player_pet if actor == 'enemy' else enemy_pet
+            #     print(f"  Defender ({enemy_acting_on.name}) buffs BEFORE enemy action: {[b.name for b in enemy_acting_on.active_buffs]}")
+            
             self.execute_action(action, attacker, defender, attacker_team, state, special_encounter_id, turn_number)
+            
+            # if actor == 'player':
+            #     print(f"  Player buffs AFTER action: {[b.name for b in attacker.active_buffs]}")
+            # else:
+            #     print(f"  Defender ({enemy_acting_on.name}) buffs AFTER enemy action: {[b.name for b in enemy_acting_on.active_buffs]}")
             if state.is_battle_over(): break
         
         if player_pet: player_pet.tick_cooldowns()
         if enemy_pet: enemy_pet.tick_cooldowns()
         
+        # Process end of turn AFTER all actions complete
         self.process_end_of_turn(state, state.player_team.get_active_pet(), state.enemy_team.get_active_pet())
         
         state.turn_number = turn_number + 1
         return state
     
     def execute_action(self, action, attacker, defender, attacker_team, state, special_encounter_id, turn_number):
-        # DEBUG logging disabled for performance
-        print(f"DEBUG: Executing {action.actor} {action.action_type} {action.ability.name if action.ability else ''}")
         if action.action_type == 'swap':
             if action.target_pet_index is not None:
                 attacker_team.active_pet_index = action.target_pet_index
@@ -142,7 +130,6 @@ class BattleSimulator:
             ability = action.ability
             attacker.use_ability(ability)
             
-            # Immunity
             is_immune = False
             if special_encounter_id == 'rocko_immunity' and SpecialEncounterHandler.apply_rocko_immunity(defender, state.turn_number): is_immune = True
             for buff in defender.active_buffs:
@@ -152,37 +139,35 @@ class BattleSimulator:
                 self.log.add_event({'type': 'immune', 'turn': turn_number, 'actor': action.actor, 'ability': ability.name})
                 return 
 
-            if ability.is_heal and ability.power > 0:
+            if ability.is_heal:
                 heal = self.damage_calc.calculate_healing(ability, attacker)
                 attacker.stats.heal(heal)
                 self.log.add_event({'type': 'heal', 'actor': action.actor, 'ability': ability.name, 'amount': heal, 'turn': turn_number})
-            elif not ability.is_heal:
-                print(f"DEBUG: Calling calculate_damage for {ability.name}")
+            else:
                 damage, details = self.damage_calc.calculate_damage(ability, attacker, defender, state.weather)
                 if details['hit']:
                     remaining = self.buff_tracker.consume_shield(defender, damage)
                     defender.stats.take_damage(remaining)
+
                     self.log.add_event({'type': 'damage', 'actor': action.actor, 'ability': ability.name, 'amount': remaining, 'turn': turn_number})
-                    self.check_death_with_racials(defender, turn_number)
+                    if not defender.stats.is_alive():
+                         self.log.add_event({'type': 'death', 'pet': defender.name, 'turn': turn_number})
                 else:
                     self.log.add_event({'type': 'miss', 'actor': action.actor, 'ability': ability.name, 'turn': turn_number})
-                
-                # Special Case: Explode (282) kills the user
-                if ability.id == 282 or ability.name == "Explode":
-                    attacker.stats.current_hp = 0
-                    self.check_death_with_racials(attacker, turn_number, note='self-destruct')
             
-            # Apply Buffs/Effects
+            # Apply ability-specific buffs and effects
             self.apply_ability_effects(ability, attacker, defender, turn_number)
 
     def apply_ability_effects(self, ability, attacker, defender, turn_number):
         """Apply status effects, buffs, and debuffs based on ability"""
-        # Dodge (312)
+        from simulator.battle_state import Buff
+        
+        # Dodge (312) - Duration 2 because WoW "lasts 1 round" = current round + next
         if ability.name == "Dodge" or ability.id == 312:
             buff = Buff(
                 type=BuffType.INVULNERABILITY,
                 name="Dodge",
-                duration=1,
+                duration=2,  # 2 rounds to survive process_end_of_turn and block next attack
                 magnitude=0,
                 source_ability=ability.name,
                 stat_affected='none'
@@ -190,76 +175,54 @@ class BattleSimulator:
             self.buff_tracker.add_buff(attacker, buff)
             self.log.add_event({'type': 'buff_applied', 'target': attacker.name, 'buff': 'Dodge', 'turn': turn_number})
 
-        # Burrow (159)
+        # Burrow (159) - Underground lasts 2 rounds, attack triggers next turn
         elif ability.name == "Burrow" or ability.id == 159:
-            # 1. Underground (Invulnerable)
             buff_underground = Buff(
                 type=BuffType.INVULNERABILITY,
                 name="Underground",
-                duration=1,
+                duration=2,  # 2 rounds to survive end-of-turn and block next attack
                 magnitude=0,
                 source_ability=ability.name,
                 stat_affected='none'
             )
             self.buff_tracker.add_buff(attacker, buff_underground)
             
-            # 2. Delayed Attack (Damage next turn)
-            # Note: Power is in ability.power (20). We need to calculate damage.
-            # For simplicity, we store base power or calculated damage?
-            # Delayed effects usually calculate damage on impact.
-            # We'll store the base power in magnitude for now, or use a fixed value.
-            # Burrow usually deals damage equal to the ability power.
             buff_attack = Buff(
                 type=BuffType.DELAYED_EFFECT,
                 name="Burrow Attack",
-                duration=1,
-                magnitude=ability.power if ability.power > 0 else 20, # Fallback
+                duration=2,  # Triggers at start of turn 2 (after 1 decrement)
+                magnitude=ability.power if ability.power > 0 else 20,
                 source_ability=ability.name,
                 stat_affected='none'
             )
             self.buff_tracker.add_buff(attacker, buff_attack)
             self.log.add_event({'type': 'buff_applied', 'target': attacker.name, 'buff': 'Underground', 'turn': turn_number})
 
-        # Black Claw (919) - Adds damage taken debuff
+        # Black Claw (919)
         elif ability.name == "Black Claw" or ability.id == 919:
             buff = Buff(
-                type=BuffType.STAT_MOD, # Or separate type for flat damage add?
+                type=BuffType.STAT_MOD,
                 name="Black Claw",
                 duration=3,
-                magnitude=144, # Flat damage add (approx for level 25)
+                magnitude=144,
                 source_ability=ability.name,
-                stat_affected='damage_taken_flat' # Custom stat for flat add
+                stat_affected='damage_taken_flat'
             )
-            # Note: BuffTracker needs to handle 'damage_taken_flat' in damage calc
-            # For now, we assume damage_calc handles it or we hack it here.
-            # Actually, DamageCalculator needs to check this.
             self.buff_tracker.add_buff(defender, buff)
             self.log.add_event({'type': 'buff_applied', 'target': defender.name, 'buff': 'Black Claw', 'turn': turn_number})
 
-        # Hunting Party (921) - Applies Shattered Defenses (Double Damage)
+        # Hunting Party (921)
         elif ability.name == "Hunting Party" or ability.id == 921:
             buff = Buff(
                 type=BuffType.STAT_MOD,
                 name="Shattered Defenses",
                 duration=2,
-                magnitude=2.0, # 100% increased damage
+                magnitude=2.0,
                 source_ability=ability.name,
                 stat_affected='damage_taken_mult'
             )
             self.buff_tracker.add_buff(defender, buff)
             self.log.add_event({'type': 'buff_applied', 'target': defender.name, 'buff': 'Shattered Defenses', 'turn': turn_number})
-
-
-    def check_death_with_racials(self, pet, turn_number, note=None):
-        if not pet.stats.is_alive():
-            # Check Mechanical Failsafe
-            if pet.family == PetFamily.MECHANICAL:
-                if RacialPassives.apply_mechanical_passive(pet):
-                    self.log.add_event({'type': 'revive', 'pet': pet.name, 'turn': turn_number, 'note': 'Failsafe'})
-                    return
-
-            # If not revived, log death
-            self.log.add_event({'type': 'death', 'pet': pet.name, 'turn': turn_number, 'note': note})
 
     def process_end_of_turn(self, state, p1, p2):
         for p in [p1, p2]:
