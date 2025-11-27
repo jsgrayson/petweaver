@@ -18,13 +18,15 @@ from .battle_state import Pet, Team, Buff, BuffType, PetFamily
 class SpecialEncounterHandler:
     """Handles gimmick fight mechanics"""
     
-    # Encounter registry: Maps species IDs to their special mechanics
+    # Encounter registry: Maps species IDs to their special mechanics functions
     SPECIAL_MECHANICS = {
-        1811: 'rocko_immunity',  # Rocko
+        # Original entries, now mapping to methods directly
+        1811: 'rocko_immunity',  # Rocko (This one is special, handled by apply_rocko_immunity directly)
         1187: 'gore_stacks',     # Gorespine
         1400: 'bone_prison',     # Jawbone (Bastion)
         1300: 'life_exchange',   # Dah'da (Wrathion) - Tentative
-        # Add more as we implement them
+        # New entries (if any, mapping to methods)
+        # Example: 157989: apply_some_new_mechanic,
     }
     
     @staticmethod
@@ -193,3 +195,39 @@ class SpecialEncounterHandler:
         for pet in team.pets:
             if pet.stats.is_alive():
                 pet.stats.heal(heal_amount)
+    @staticmethod
+    def apply_unit_17_passive(simulator, pet: Pet, enemy_team: Team):
+        """
+        Unit 17 Passive: Takes 50% reduced damage.
+        Implemented as a permanent 50% damage reduction buff.
+        """
+        # Check if already applied
+        if any(b.name == "Unit 17 Passive" for b in pet.active_buffs):
+            return
+
+        # Create a permanent buff that reduces damage taken
+        passive_buff = Buff(
+            type=BuffType.STAT_MOD,
+            name="Unit 17 Passive",
+            duration=999,  # Permanent
+            magnitude=0.5, # 50% reduction (multiplier)
+            stat_affected='damage_taken',
+            source_ability=99998,
+            source_pet_index=pet.index if hasattr(pet, 'index') else 0,
+            snapshot_hp=pet.stats.current_hp
+        )
+        # Note: stat_multipliers is not a direct init arg for Buff, it uses magnitude + stat_affected
+        # But for complex buffs we might need more. 
+        # The Buff class in battle_state.py handles simple stat mods via magnitude.
+        # If stat_affected is 'damage_taken', magnitude should be the multiplier (e.g. 0.5 for 50% taken, or 0.5 reduction?)
+        # Usually 0.5 means 50% damage taken (reduction). 
+        # Let's assume magnitude is the multiplier for damage taken.
+        
+        pet.active_buffs.append(passive_buff)
+        if hasattr(simulator, 'log_event'):
+            simulator.log_event(f"{pet.name} gains Unit 17 Passive (50% Damage Reduction)!")
+
+# Map pet names to their special mechanic functions
+SPECIAL_MECHANICS_BY_NAME = {
+    "Unit 17": SpecialEncounterHandler.apply_unit_17_passive
+}

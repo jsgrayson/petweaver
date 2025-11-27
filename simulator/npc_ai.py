@@ -29,6 +29,18 @@ def create_npc_agent(npc_name: str, default_ai: Optional[Callable[[BattleState],
         smart_agent = SmartAgent(difficulty=1.0)
         default_ai = smart_agent.decide
 
+    # Load extracted priorities if available
+    import json
+    import os
+    npc_priorities = {}
+    try:
+        if os.path.exists('npc_ai_priorities.json'):
+            with open('npc_ai_priorities.json', 'r') as f:
+                npc_priorities = json.load(f)
+                print(f"✅ Loaded {len(npc_priorities)} AI priority scripts")
+    except Exception as e:
+        print(f"⚠️ Failed to load AI priorities: {e}")
+
     def npc_agent(state: BattleState) -> TurnAction:
         enemy_team = state.enemy_team
         active_pet = enemy_team.get_active_pet()
@@ -46,7 +58,77 @@ def create_npc_agent(npc_name: str, default_ai: Optional[Callable[[BattleState],
         player_pet = state.player_team.get_active_pet()
         current_round = state.turn_number
 
-        # 1. Enhanced AI Script Logic (NEW)
+        # 1. CHECK EXTRACTED PRIORITIES (NEW)
+        # Construct key for current team: "id1,id2,id3"
+        team_key = ",".join(str(p.species_id) for p in enemy_team.pets)
+        priority_script = npc_priorities.get(team_key)
+        
+        if priority_script:
+            # Evaluate script
+            for step in priority_script:
+                # Check condition
+                condition_met = True
+                if step.get('condition'):
+                    cond = step['condition']
+                    # Simple condition parsing
+                    if 'round=' in cond:
+                        try:
+                            req_round = int(cond.split('round=')[1].split(']')[0].strip())
+                            if current_round != req_round: condition_met = False
+                        except: pass
+                    
+                    # Add more condition parsing here as needed (e.g., hp checks)
+                    # For now, round checks are the most critical for fixed rotations
+                
+                if condition_met:
+                    if step['type'] == 'ability':
+                        ability_id = step['id']
+                        matching = next((ab for ab in active_pet.abilities if ab.id == ability_id), None)
+                        if matching and active_pet.can_use_ability(matching):
+                            return TurnAction(actor='enemy', action_type='ability', ability=matching)
+                    
+                    elif step['type'] == 'change':
+                        target = step['target']
+                        target_idx = -1
+                        if target == 'next':
+                            # Find next alive pet
+                            for i in range(len(enemy_team.pets)):
+                                if i != enemy_team.active_pet_index and enemy_team.pets[i].stats.is_alive():
+                                    target_idx = i
+                                    break
+                        elif target.startswith('#'):
+                            try:
+                                # #1 is index 0, #2 is index 1, etc.
+                                idx = int(target.replace('#', '')) - 1
+                                if 0 <= idx < len(enemy_team.pets) and enemy_team.pets[idx].stats.is_alive():
+                                    target_idx = idx
+                            except: pass
+                        
+                        if target_idx != -1:
+                            return TurnAction(actor='enemy', action_type='swap', target_pet_index=target_idx)
+                    
+                    elif step['type'] == 'pass':
+                        return TurnAction(actor='enemy', action_type='pass')
+
+        # Special AI for Enok the Stinky
+        if npc_name == "Enok the Stinky":
+            # Rotation: 1. Bash Punch (119), 2. Whirlpool (506), 3. Healing Wrap (Custom/420 placeholder)
+            # Cycle: 1, 2, 3, 1, 2, 3...
+            cycle_pos = (current_round - 1) % 3
+            
+            # Map cycle position to ability slot (0-indexed)
+            # Slot 0: Punch (119)
+            # Slot 1: Whirlpool (506)
+            # Slot 2: Healing Wrap (We need to ensure this is in slot 2)
+            
+            target_slot = 0
+            if cycle_pos == 1: target_slot = 1
+            elif cycle_pos == 2: target_slot = 2
+            
+            if target_slot < len(active_pet.abilities):
+                ability = active_pet.abilities[target_slot]
+                if active_pet.can_use_ability(ability):
+                    return TurnAction(actor='enemy', action_type='ability', ability=ability)
         if enhanced_ai:
             # A. Priority abilities [round=1]
             for priority in enhanced_ai.get('priority_abilities', []):

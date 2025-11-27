@@ -779,10 +779,20 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
                 with open('ability_stats_manual.json', 'r') as f:
                     manual_stats = json.load(f)
                     # Merge manual stats into real_abilities
+                    # Merge manual stats into real_abilities
                     for ab_id, stats in manual_stats.get('abilities', {}).items():
                         if ab_id in real_abilities:
                             # Override with manual stats
                             real_abilities[ab_id].update(stats)
+                        else:
+                            # Add missing ability
+                            real_abilities[ab_id] = stats.copy()
+                            # Ensure minimal fields
+                            if 'id' not in real_abilities[ab_id]:
+                                real_abilities[ab_id]['id'] = int(ab_id)
+                            if 'family_id' not in real_abilities[ab_id]:
+                                real_abilities[ab_id]['family_id'] = 7 # Default Beast
+                        
                         genetic_state["log"].append(f"Loaded {len(manual_stats.get('abilities', {}))} manual ability stats")
             except FileNotFoundError:
                 genetic_state["log"].append("WARNING: ability_stats_manual.json not found, using API defaults")
@@ -820,6 +830,10 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
                     species_data = json.load(f)
                     for sid_str, data in species_data.items():
                         species_info_map[int(sid_str)] = data
+                        
+                        # Merge PetTracker Base Stats if available
+                        if sid_str in pt_base_stats:
+                             species_info_map[int(sid_str)]['base_stats'] = pt_base_stats[sid_str]
             
             if not available_species:
                 raise Exception("No species data found. Please run fetch_ability_data.py first.")
@@ -1030,23 +1044,56 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
 
         print(f"DEBUG: stats keys: {stats.keys()}")
         
-        genetic_state["top_teams"] = [
-            {
+        genetic_state["top_teams"] = []
+        for idx, genome in enumerate(stats.get("top_genomes", [])):
+            # Convert genome to full team to get stats and ability details
+            full_team = evaluator._genome_to_team(genome)
+            
+            # Capture battle log for the #1 team only (to save bandwidth)
+            battle_log = None
+            if idx == 0:
+                try:
+                    # Re-run a single battle with logging enabled
+                    result = evaluator.play_battle(genome, enable_logging=True)
+                    if result and 'log' in result:
+                        battle_log = result['log'].get_full_log()
+                except Exception as e:
+                    print(f"Error capturing battle log: {e}")
+            
+            team_data = {
                 "fitness": genome.fitness,
-                "pets": [
-                    {
-                        "species_id": p.species_id, 
-                        "name": species_info_map.get(p.species_id, {}).get('name', f"Species {p.species_id}"),
-                        "family_id": species_info_map.get(p.species_id, {}).get('family_id', 0),
-                        "abilities": p.abilities,  # List of ability IDs
-                        "priority": p.strategy.priority  # Ability priority order
-                    }
-                    for p in genome.pets
-                ],
-                "stats": genome.stats
+                "stats": genome.stats,
+                "battle_log": battle_log,
+                "pets": []
             }
-            for genome in stats.get("top_genomes", [])
-        ]
+            
+            for i, pet in enumerate(full_team.pets):
+                pet_data = {
+                    "species_id": pet.species_id,
+                    "name": pet.name,
+                    "family_id": pet.family.value,
+                    "stats": {
+                        "health": pet.stats.max_hp,
+                        "power": pet.stats.power,
+                        "speed": pet.stats.speed
+                    },
+                    "abilities": []
+                }
+                
+                # Get active abilities (the 3 selected)
+                for ability in pet.abilities:
+                    pet_data["abilities"].append({
+                        "id": ability.id,
+                        "name": ability.name,
+                        "power": ability.power,
+                        "accuracy": ability.accuracy,
+                        "cooldown": ability.cooldown,
+                        "type": ability.family.name.capitalize()
+                    })
+                
+                team_data["pets"].append(pet_data)
+            
+            genetic_state["top_teams"].append(team_data)
         
     except Exception as e:
         import traceback

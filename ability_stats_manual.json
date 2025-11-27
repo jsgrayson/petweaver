@@ -2,6 +2,25 @@
   "comment": "Manual ability database with real power/accuracy/speed values from WoW datamining",
   "source": "Values compiled from community sources (Warcraft Pets, Xu-Fu's, SimulationCraft)",
   "abilities": {
+    "99901": {
+      "id": 99901,
+      "name": "Healing Wrap X",
+      "power": 0,
+      "accuracy": 100,
+      "cooldown": 0,
+      "priority": 0,
+      "is_heal": true,
+      "effect_type": "full_heal"
+    },
+    "99902": {
+      "id": 99902,
+      "name": "Whirlpool X",
+      "power": 1500,
+      "accuracy": 100,
+      "cooldown": 0,
+      "priority": 0,
+      "effect_type": "delayed_nuke"
+    },
     "919": {
       "name": "Black Claw",
       "power": 0,

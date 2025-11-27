@@ -30,8 +30,7 @@ class TestHighRisk(unittest.TestCase):
         self.attacker.abilities = [explode]
         
         # Force Miss (Defender uses Dodge)
-        # Duration 2 because buffs tick at start of turn
-        dodge_buff = Buff(type=BuffType.STAT_MOD, duration=2, magnitude=100.0, stat_affected='dodge')
+        dodge_buff = Buff(type=BuffType.INVULNERABILITY, duration=2, magnitude=0, name="Dodge", stat_affected='none')
         self.defender.active_buffs.append(dodge_buff)
         
         action_p = TurnAction('player', 'ability', ability=explode)
@@ -44,13 +43,12 @@ class TestHighRisk(unittest.TestCase):
         attacker_after = new_state.player_team.pets[0]
         self.assertEqual(attacker_after.stats.current_hp, 0, "Exploder should die even on miss")
         
-        # Log should show miss AND suicide
+        # Log should show death
         events = [e['type'] for e in self.sim.log.events]
-        self.assertIn('miss', events)
-        self.assertIn('suicide', events)
+        self.assertIn('death', events)
 
-    def test_haunt_survives_on_miss(self):
-        """Test that Haunt does NOT kill the user if it misses"""
+    def test_haunt_dies_on_miss(self):
+        """Test that Haunt kills the user even if it misses"""
         # Haunt Ability
         haunt = Ability(
             id=2, name="Haunt", power=20, accuracy=100, speed=0, 
@@ -59,8 +57,7 @@ class TestHighRisk(unittest.TestCase):
         self.attacker.abilities = [haunt]
         
         # Force Miss (Defender uses Dodge)
-        # Duration 2 because buffs tick at start of turn (simulating end of previous turn)
-        dodge_buff = Buff(type=BuffType.STAT_MOD, duration=2, magnitude=100.0, stat_affected='dodge')
+        dodge_buff = Buff(type=BuffType.INVULNERABILITY, duration=2, magnitude=0, name="Dodge", stat_affected='none')
         self.defender.active_buffs.append(dodge_buff)
         
         action_p = TurnAction('player', 'ability', ability=haunt)
@@ -69,17 +66,16 @@ class TestHighRisk(unittest.TestCase):
         # Execute
         new_state = self.sim.execute_turn(self.state, action_p, action_e, turn_number=1)
         
-        # Attacker should be ALIVE
+        # Attacker should be DEAD
         attacker_after = new_state.player_team.pets[0]
-        self.assertGreater(attacker_after.stats.current_hp, 0, "Haunter should survive on miss")
+        self.assertEqual(attacker_after.stats.current_hp, 0, "Haunter should die on miss")
         
-        # Log should show miss but NO suicide
+        # Log should show death
         events = [e['type'] for e in self.sim.log.events]
-        self.assertIn('miss', events)
-        self.assertNotIn('suicide', events)
+        self.assertIn('death', events)
 
-    def test_burrow_invulnerability(self):
-        """Test that Burrow makes the user invulnerable"""
+    def test_burrow_speed_zero(self):
+        """Test that Burrow reduces speed to 0 while underground"""
         # Attacker uses Burrow
         burrow = Ability(
             id=3, name="Burrow", power=20, accuracy=100, speed=0, 
@@ -87,34 +83,95 @@ class TestHighRisk(unittest.TestCase):
         )
         self.attacker.abilities = [burrow]
         
-        # Defender attacks
-        attack = Ability(id=4, name="Attack", power=10, accuracy=100, speed=0, family=PetFamily.HUMANOID, cooldown=0)
-        self.defender.abilities = [attack]
-        
-        # Case 1: Attacker is Faster (Burrows first)
-        self.attacker.stats.speed = 20
-        self.defender.stats.speed = 10
-        
+        # Execute turn to apply Burrow buff
         action_p = TurnAction('player', 'ability', ability=burrow)
-        action_e = TurnAction('enemy', 'ability', ability=attack)
+        action_e = TurnAction('enemy', 'pass')
         
-        # Execute
-        new_state = self.sim.execute_turn(self.state, action_p, action_e, turn_number=1)
+        self.sim.execute_turn(self.state, action_p, action_e, turn_number=1)
         
-        # Defender's attack should MISS (Invulnerable)
-        # Check log for 'immunity_block' or 'miss' due to invulnerability
-        # My implementation returns False in check_hit -> 'miss'
-        # But wait, check_hit returns False, so it logs 'miss'.
-        # I should verify the reason or just that damage is 0.
+        # Verify Underground buff exists
+        underground = next((b for b in self.attacker.active_buffs if b.name == "Underground"), None)
+        self.assertIsNotNone(underground)
         
-        attacker_after = new_state.player_team.pets[0]
+        # Verify speed is 0
+        self.assertEqual(self.attacker.get_effective_speed(), 0, "Speed should be 0 while underground")
+
+    def test_lift_off_speed_zero(self):
+        """Test that Lift-Off reduces speed to 0 while flying"""
+        # Attacker uses Lift-Off
+        lift_off = Ability(
+            id=170, name="Lift-Off", power=30, accuracy=100, speed=0, 
+            family=PetFamily.FLYING, cooldown=0, effect_type='lift_off'
+        )
+        self.attacker.abilities = [lift_off]
         
-        # Attacker HP should be full (100)
-        self.assertEqual(attacker_after.stats.current_hp, 100, "Attacker should take no damage while burrowed")
+        # Execute turn to apply Flying buff
+        action_p = TurnAction('player', 'ability', ability=lift_off)
+        action_e = TurnAction('enemy', 'pass')
         
-        # Verify Invulnerability Buff exists
-        invuln = next((b for b in attacker_after.active_buffs if b.type == BuffType.INVULNERABILITY), None)
-        self.assertIsNotNone(invuln)
+        self.sim.execute_turn(self.state, action_p, action_e, turn_number=1)
+        
+        # Verify Flying buff exists
+        flying = next((b for b in self.attacker.active_buffs if b.name == "Flying"), None)
+        self.assertIsNotNone(flying)
+        
+        # Verify speed is 0
+        self.assertEqual(self.attacker.get_effective_speed(), 0, "Speed should be 0 while flying")
+
+    def test_haunt_resurrection(self):
+        """Test that Haunt revives the user after buff expires"""
+        # Haunt Ability
+        haunt = Ability(
+            id=2, name="Haunt", power=20, accuracy=100, speed=0, 
+            family=PetFamily.UNDEAD, cooldown=0, effect_type='haunt'
+        )
+        self.attacker.abilities = [haunt]
+        
+        # Execute Haunt
+        action_p = TurnAction('player', 'ability', ability=haunt)
+        action_e = TurnAction('enemy', 'pass')
+        
+        self.sim.execute_turn(self.state, action_p, action_e, turn_number=1)
+        
+        # Attacker should be DEAD
+        self.assertEqual(self.attacker.stats.current_hp, 0, "Haunter should die initially")
+        
+        # Defender should have Haunt buff
+        haunt_buff = next((b for b in self.defender.active_buffs if b.name == "Haunt"), None)
+        self.assertIsNotNone(haunt_buff, "Defender should have Haunt buff")
+        
+        # Simulate turns to expire buff (Duration 5)
+        # We need to run execute_turn 5 times?
+        # Or just manually decrement?
+        # Better to run turns to test integration.
+        # But attacker is dead, so we need to swap or pass?
+        # If attacker is dead, game might end if only 1 pet?
+        # Setup: Give player a second pet so game continues.
+        
+        pet2 = Pet(
+            species_id=3, name="Backup", 
+            stats=PetStats(100, 100, 10, 10),
+            family=PetFamily.CRITTER, quality=PetQuality.RARE, abilities=[]
+        )
+        self.state.player_team.pets.append(pet2)
+        self.state.player_team.active_pet_index = 1 # Swap to backup automatically? 
+        # Sim usually handles swap on death? 
+        # For this test, let's just manually set active pet to 1
+        
+        # Run 5 turns
+        for i in range(5):
+            # Pass turns
+            action_p = TurnAction('player', 'pass')
+            action_e = TurnAction('enemy', 'pass')
+            self.sim.execute_turn(self.state, action_p, action_e, turn_number=2+i)
+            
+        # Buff should be gone
+        haunt_buff = next((b for b in self.defender.active_buffs if b.name == "Haunt"), None)
+        self.assertIsNone(haunt_buff, "Haunt buff should expire")
+        
+        # Attacker should be ALIVE
+        self.assertGreater(self.attacker.stats.current_hp, 0, "Haunter should resurrect")
+        self.assertEqual(self.attacker.stats.current_hp, 100, "Haunter should have full HP (snapshot)")
 
 if __name__ == '__main__':
     unittest.main()

@@ -43,6 +43,18 @@ class EvolutionEngine:
         species_db = getattr(self.evaluator, 'species_db', {})
         ability_info_db = getattr(self.evaluator, 'ability_db', {})
         
+        # Synergy Enablers: Abilities that make the whole team better
+        # Black Claw (919), Flock (581), Swarm (706), Hunting Party (921), Wild Magic (593), Supercharge (208), Howl (362)
+        SYNERGY_ABILITIES = {919, 581, 706, 921, 593, 208, 362}
+        synergy_pets = []
+        
+        # Pre-scan for synergy pets
+        for sid in available_species:
+            my_ability_ids = ability_db.get(sid, [])
+            if isinstance(my_ability_ids, dict): my_ability_ids = my_ability_ids.get('abilities', [])
+            if any(aid in SYNERGY_ABILITIES for aid in my_ability_ids):
+                synergy_pets.append(sid)
+        
         if not enemy_team: return
         self.slot_pools = [[], [], []]
         
@@ -56,6 +68,7 @@ class EvolutionEngine:
                 score = 0
                 s_data = species_db.get(str(sid)) or species_db.get(sid)
                 my_ability_ids = ability_db.get(sid, [])
+                if isinstance(my_ability_ids, dict): my_ability_ids = my_ability_ids.get('abilities', [])
                 if not my_ability_ids: continue
 
                 # 1. Strong Attack vs This Specific Enemy
@@ -70,12 +83,19 @@ class EvolutionEngine:
                 if s_data:
                     my_fam = s_data.get('family_id', 7)
                     if self.get_type_effectiveness(enemy_pet.family, my_fam) < 1.0: score += 5
+                
+                # 3. Synergy Bonus (Always include synergy pets)
+                if sid in synergy_pets: score += 5
 
                 if score >= 10: counters.append(sid)
             
+            # Ensure synergy pets are always available in the pool
+            # (Unless pool is huge, then maybe just some? For now, add all unique)
+            counters = list(set(counters + synergy_pets))
+            
             if not counters: counters = available_species 
             self.slot_pools[i] = counters
-            print(f"    [AI] Fight {i+1} Pool: {len(counters)} candidates.")
+            print(f"    [AI] Fight {i+1} Pool: {len(counters)} candidates (inc. {len(synergy_pets)} synergy).")
 
     def initialize_population(self, available_species, ability_db, npc_name=None, strategy_manager=None, capture_mode=False):
         self.available_species = available_species
@@ -113,6 +133,10 @@ class EvolutionEngine:
         if status[1] == "W" and self.locked_slots[0]: self.locked_slots[1] = True
         if status[2] == "W" and self.locked_slots[1]: self.locked_slots[2] = True
         
+        # DEBUG
+        # print(f"DEBUG: Best Fitness: {self.best_genome.fitness}, Status: {status}, Locked: {self.locked_slots}")
+        # print(f"DEBUG: Best Pet 0 Species: {self.best_genome.pets[0].species_id}")
+        
         # Determine which Fight we are on
         active_slot = 0
         for i, locked in enumerate(self.locked_slots):
@@ -120,37 +144,61 @@ class EvolutionEngine:
                 active_slot = i
                 break
 
-        # 3. Reproduction (Focus on the Active Fight)
+        # 3. Reproduction
         new_pop = []
-        new_pop.append(copy.deepcopy(self.best_genome))
         
+        # Elitism: Keep top N
+        for i in range(self.elitism_count):
+            if i < len(self.population):
+                elite = copy.deepcopy(self.population[i])
+                # Enforce locks on elites too (in case lock status just changed)
+                for j, is_locked in enumerate(self.locked_slots):
+                    if is_locked:
+                        elite.pets[j] = copy.deepcopy(self.best_genome.pets[j])
+                new_pop.append(elite)
+        
+        # Fill the rest with bred children
         pool = self.slot_pools[active_slot] if active_slot < 3 else available_species
         
         while len(new_pop) < self.pop_size:
-            child = copy.deepcopy(self.best_genome)
+            # Selection
+            parent_a = self._tournament_select()
+            parent_b = self._tournament_select()
             
-            # Enforce Locks (Don't change pets that already won)
+            # Crossover
+            child = parent_a.crossover(parent_b)
+            
+            # Mutation
+            # We always try to mutate to maintain diversity, especially in the active slot
+            if random.random() < self.mutation_rate:
+                # Mutate Pet (Swap species) - Higher chance if fitness is low
+                if random.random() < 0.4:
+                    # Mutate the Active Slot specifically
+                    if active_slot < 3:
+                        new_id = random.choice(pool)
+                        possible_abs = self.ability_db.get(new_id, [])
+                        selected_abs = []
+                        if possible_abs:
+                            if isinstance(possible_abs, list):
+                                selected_abs = possible_abs[:3] if len(possible_abs)>=3 else possible_abs
+                        
+                        child.pets[active_slot] = PetGene(
+                            species_id=new_id, 
+                            abilities=selected_abs, 
+                            strategy=StrategyGene()
+                        )
+                        child.fitness = 0
+                else:
+                    # Standard mutation (Abilities, Breeds, Strategy)
+                    child.mutate(available_species, self.ability_db, self.mutation_rate, getattr(self.evaluator, 'species_db', None))
+            
+            # Enforce Locks (CRITICAL: Overwrite locked slots with the BEST known solution)
+            # This ensures we don't "breed out" the winning pets for previous fights
+            # MUST be done AFTER mutation to prevent accidental changes
             for i, is_locked in enumerate(self.locked_slots):
                 if is_locked:
                     child.pets[i] = copy.deepcopy(self.best_genome.pets[i])
             
-            # Mutate the Active Slot
-            if active_slot < 3 and random.random() < self.mutation_rate:
-                new_id = random.choice(pool)
-                
-                possible_abs = self.ability_db.get(new_id, [])
-                selected_abs = []
-                if possible_abs:
-                    if isinstance(possible_abs, list):
-                        selected_abs = possible_abs[:3] if len(possible_abs)>=3 else possible_abs
-                
-                child.pets[active_slot] = PetGene(
-                    species_id=new_id, 
-                    abilities=selected_abs, 
-                    strategy=StrategyGene()
-                )
-                child.fitness = 0
-                
             new_pop.append(child)
             
         avg_fitness = sum(g.fitness for g in self.population) / self.pop_size
@@ -166,4 +214,6 @@ class EvolutionEngine:
         }
 
     def _tournament_select(self, k=3):
-        return random.choice(self.population) # Simplified for slot machine logic
+        """Select the best individual from k random picks"""
+        tournament = random.sample(self.population, k)
+        return max(tournament, key=lambda g: g.fitness)

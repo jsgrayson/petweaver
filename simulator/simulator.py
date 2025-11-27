@@ -137,6 +137,9 @@ class BattleSimulator:
             
             if is_immune:
                 self.log.add_event({'type': 'immune', 'turn': turn_number, 'actor': action.actor, 'ability': ability.name})
+                # Even if immune, self-effects (Explode/Haunt suicide, Lift-Off buff) should trigger.
+                # Pass is_hit=False so enemy debuffs aren't applied.
+                self.apply_ability_effects(ability, attacker, defender, turn_number, is_hit=False, attacker_team=attacker_team)
                 return 
 
             if ability.is_heal:
@@ -144,24 +147,99 @@ class BattleSimulator:
                 attacker.stats.heal(heal)
                 self.log.add_event({'type': 'heal', 'actor': action.actor, 'ability': ability.name, 'amount': heal, 'turn': turn_number})
             else:
+                # Life Exchange Special Handling (Bypass damage calc, ignore shields/caps)
+                if ability.name == "Life Exchange" or ability.id == 284:
+                    SpecialEncounterHandler.apply_life_exchange(attacker, defender)
+                    self.log.add_event({'type': 'life_exchange', 'actor': action.actor, 'turn': turn_number})
+                    # Apply ability effects (like cooldowns) then return
+                    self.apply_ability_effects(ability, attacker, defender, turn_number)
+                    return
+
+                # Mind Games Special Handling (Team Damage)
+                if ability.name == "Mind Games" or ability.id == 2388:
+                    SpecialEncounterHandler.apply_mind_games(state.player_team if action.actor == 'enemy' else state.enemy_team, attacker)
+                    self.log.add_event({'type': 'mind_games', 'actor': action.actor, 'turn': turn_number})
+                    self.apply_ability_effects(ability, attacker, defender, turn_number)
+                    return
+
+                # Bone Prison Special Handling (Stun)
+                if ability.name == "Bone Prison" or ability.id == 650:
+                    SpecialEncounterHandler.apply_bone_prison(defender)
+                    self.log.add_event({'type': 'bone_prison', 'actor': action.actor, 'target': defender.name, 'turn': turn_number})
+                    self.apply_ability_effects(ability, attacker, defender, turn_number)
+                    return
+
                 damage, details = self.damage_calc.calculate_damage(ability, attacker, defender, state.weather)
                 if details['hit']:
                     remaining = self.buff_tracker.consume_shield(defender, damage)
                     defender.stats.take_damage(remaining)
+                    
+                    # Toxic Skin Reflection (Glitterdust)
+                    # Check if defender has Toxic Skin buff (ID 1086/1087 or name "Toxic Skin")
+                    has_toxic_skin = False
+                    for buff in defender.active_buffs:
+                        if buff.name == "Toxic Skin" or buff.source_ability in [1086, 1087]:
+                            has_toxic_skin = True
+                            break
+                    
+                    if has_toxic_skin:
+                        reflected = SpecialEncounterHandler.apply_toxic_skin(attacker, remaining)
+                        if reflected > 0:
+                            self.log.add_event({'type': 'damage', 'actor': 'reflection', 'ability': 'Toxic Skin', 'amount': reflected, 'turn': turn_number})
 
                     self.log.add_event({'type': 'damage', 'actor': action.actor, 'ability': ability.name, 'amount': remaining, 'turn': turn_number})
                     if not defender.stats.is_alive():
-                         self.log.add_event({'type': 'death', 'pet': defender.name, 'turn': turn_number})
+                         # Check Undead Racial
+                         from simulator.racial_passives import RacialPassives
+                         from simulator.battle_state import PetFamily
+                         
+                         if defender.family == PetFamily.UNDEAD and RacialPassives.apply_undead_passive(defender):
+                             defender.stats.current_hp = 1 # Keep alive
+                             self.log.add_event({'type': 'racial', 'pet': defender.name, 'racial': 'Undead', 'turn': turn_number})
+                         else:
+                             self.log.add_event({'type': 'death', 'pet': defender.name, 'turn': turn_number})
                 else:
                     self.log.add_event({'type': 'miss', 'actor': action.actor, 'ability': ability.name, 'turn': turn_number})
             
             # Apply ability-specific buffs and effects
-            self.apply_ability_effects(ability, attacker, defender, turn_number)
+            # Pass hit status (default True if no details, e.g. Life Exchange)
+            is_hit = details.get('hit', True) if 'details' in locals() else True
+            self.apply_ability_effects(ability, attacker, defender, turn_number, is_hit, attacker_team)
 
-    def apply_ability_effects(self, ability, attacker, defender, turn_number):
+    def apply_ability_effects(self, ability, attacker, defender, turn_number, is_hit=True, attacker_team=None):
         """Apply status effects, buffs, and debuffs based on ability"""
         from simulator.battle_state import Buff
         
+        # Explode (282) - Kills user immediately (even on miss)
+        if ability.name == "Explode" or ability.id == 282 or ability.effect_type == 'explode':
+            attacker.stats.current_hp = 0
+            self.log.add_event({'type': 'death', 'pet': attacker.name, 'reason': 'Explode', 'turn': turn_number})
+            
+        # Haunt (652) - Kills user immediately (even on miss)
+        elif ability.name == "Haunt" or ability.id == 652 or ability.effect_type == 'haunt':
+            # Capture HP for resurrection (before killing)
+            # Note: Haunt restores the SAME health the user had.
+            snapshot_hp = attacker.stats.current_hp
+            source_index = attacker_team.pets.index(attacker) if attacker_team else None
+            
+            attacker.stats.current_hp = 0
+            self.log.add_event({'type': 'death', 'pet': attacker.name, 'reason': 'Haunt', 'turn': turn_number})
+            
+            # If hit, apply Haunt buff to defender
+            if is_hit:
+                buff = Buff(
+                    type=BuffType.DOT, # Haunt acts like a DoT/Debuff
+                    name="Haunt",
+                    duration=5, # usually 4-5 rounds? Let's assume 5 based on standard
+                    magnitude=0, # Damage handled by DoT logic if any, or special effect
+                    source_ability=ability.name,
+                    stat_affected='haunt', # Special marker
+                    source_pet_index=source_index,
+                    snapshot_hp=snapshot_hp
+                )
+                defender.active_buffs.append(buff)
+                self.log.add_event({'type': 'buff_applied', 'target': defender.name, 'buff': 'Haunt', 'turn': turn_number})
+
         # Dodge (312) - Duration 2 because WoW "lasts 1 round" = current round + next
         if ability.name == "Dodge" or ability.id == 312:
             buff = Buff(
@@ -198,30 +276,55 @@ class BattleSimulator:
             self.buff_tracker.add_buff(attacker, buff_attack)
             self.log.add_event({'type': 'buff_applied', 'target': attacker.name, 'buff': 'Underground', 'turn': turn_number})
 
+        # Lift-Off (170) - Flying lasts 2 rounds, attack triggers next turn
+        elif ability.name == "Lift-Off" or ability.id == 170:
+            buff_flying = Buff(
+                type=BuffType.INVULNERABILITY,
+                name="Flying",
+                duration=2,
+                magnitude=0,
+                source_ability=ability.name,
+                stat_affected='none'
+            )
+            self.buff_tracker.add_buff(attacker, buff_flying)
+            
+            buff_attack = Buff(
+                type=BuffType.DELAYED_EFFECT,
+                name="Lift-Off Attack",
+                duration=2,
+                magnitude=ability.power if ability.power > 0 else 30, # Lift-Off usually stronger?
+                source_ability=ability.name,
+                stat_affected='none'
+            )
+            self.buff_tracker.add_buff(attacker, buff_attack)
+            self.log.add_event({'type': 'buff_applied', 'target': attacker.name, 'buff': 'Flying', 'turn': turn_number})
+
         # Black Claw (919)
         elif ability.name == "Black Claw" or ability.id == 919:
-            buff = Buff(
-                type=BuffType.STAT_MOD,
-                name="Black Claw",
-                duration=3,
-                magnitude=144,
-                source_ability=ability.name,
-                stat_affected='damage_taken_flat'
-            )
-            self.buff_tracker.add_buff(defender, buff)
-            self.log.add_event({'type': 'buff_applied', 'target': defender.name, 'buff': 'Black Claw', 'turn': turn_number})
+            if is_hit:
+                buff = Buff(
+                    type=BuffType.STAT_MOD,
+                    name="Black Claw",
+                    duration=3,
+                    magnitude=144,
+                    source_ability=ability.name,
+                    stat_affected='damage_taken_flat'
+                )
+                self.buff_tracker.add_buff(defender, buff)
+                self.log.add_event({'type': 'buff_applied', 'target': defender.name, 'buff': 'Black Claw', 'turn': turn_number})
 
         # Hunting Party (921)
         elif ability.name == "Hunting Party" or ability.id == 921:
-            buff = Buff(
-                type=BuffType.STAT_MOD,
-                name="Shattered Defenses",
-                duration=2,
-                magnitude=2.0,
-                source_ability=ability.name,
-                stat_affected='damage_taken_mult'
-            )
-            self.buff_tracker.add_buff(defender, buff)
+            if is_hit:
+                buff = Buff(
+                    type=BuffType.STAT_MOD,
+                    name="Shattered Defenses",
+                    duration=2,
+                    magnitude=2.0,
+                    source_ability=ability.name,
+                    stat_affected='damage_taken_mult'
+                )
+                self.buff_tracker.add_buff(defender, buff)
             self.log.add_event({'type': 'buff_applied', 'target': defender.name, 'buff': 'Shattered Defenses', 'turn': turn_number})
 
     def process_end_of_turn(self, state, p1, p2):
@@ -247,14 +350,53 @@ class BattleSimulator:
                 
             # 3. Death check - if DoT killed pet, skip HoT
             if not p.stats.is_alive():
-                self.log.add_event({'type': 'death', 'pet': p.name, 'reason': 'DoT'})
-                # Do not process HoT for dead pets
-                self.buff_tracker.decrement_durations(p)
-                continue
+                # Check Undead Racial (for DoT deaths)
+                from simulator.racial_passives import RacialPassives
+                from simulator.battle_state import PetFamily
+                
+                if p.family == PetFamily.UNDEAD and RacialPassives.apply_undead_passive(p):
+                    p.stats.current_hp = 1 # Keep alive
+                    self.log.add_event({'type': 'racial', 'pet': p.name, 'racial': 'Undead', 'turn': state.turn_number})
+                else:
+                    self.log.add_event({'type': 'death', 'pet': p.name, 'reason': 'DoT'})
+                    # Do not process HoT for dead pets
+                    events = self.buff_tracker.decrement_durations(p)
+                    for event in events:
+                        if event['type'] == 'buff_expired' and event['buff'].stat_affected == 'haunt':
+                            self.handle_haunt_resurrection(state, p, event['buff'])
+                    continue
                 
             # 4. HoT healing (only if still alive after DoT)
             if p.stats.is_alive():
                 self.buff_tracker.process_hots(p)
                 
             # 5. Decrement buff durations
-            self.buff_tracker.decrement_durations(p)
+            events = self.buff_tracker.decrement_durations(p)
+            for event in events:
+                if event['type'] == 'buff_expired' and event['buff'].stat_affected == 'haunt':
+                    self.handle_haunt_resurrection(state, p, event['buff'])
+            
+            # 6. Handle Undead Racial Expiration
+            if hasattr(p, 'has_undead_revive') and p.has_undead_revive:
+                p.revive_turns_remaining -= 1
+                if p.revive_turns_remaining < 0:
+                    p.has_undead_revive = False
+                    p.stats.current_hp = 0
+                    self.log.add_event({'type': 'death', 'pet': p.name, 'reason': 'Undead Racial Expired'})
+
+    def handle_haunt_resurrection(self, state, host_pet, buff):
+        """Handle resurrection when Haunt buff expires/removed"""
+        # Determine source team (opposite of host)
+        if host_pet in state.player_team.pets:
+            source_team = state.enemy_team
+        else:
+            source_team = state.player_team
+            
+        if buff.source_pet_index is not None and 0 <= buff.source_pet_index < len(source_team.pets):
+            source_pet = source_team.pets[buff.source_pet_index]
+            
+            # Revive if dead
+            if not source_pet.stats.is_alive():
+                hp_to_restore = buff.snapshot_hp if buff.snapshot_hp else 1
+                source_pet.stats.current_hp = hp_to_restore
+                self.log.add_event({'type': 'resurrect', 'pet': source_pet.name, 'hp': hp_to_restore, 'reason': 'Haunt'})

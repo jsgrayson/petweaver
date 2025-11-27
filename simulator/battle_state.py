@@ -76,6 +76,16 @@ class PetStats:
         self.current_hp = min(self.max_hp, self.current_hp + amount)
         return actual_heal
 
+    def clone(self) -> 'PetStats':
+        """Fast copy"""
+        return PetStats(
+            max_hp=self.max_hp,
+            current_hp=self.current_hp,
+            power=self.power,
+            speed=self.speed,
+            breed_id=self.breed_id
+        )
+
 
 @dataclass
 class Ability:
@@ -118,11 +128,27 @@ class Buff:
     stat_affected: Optional[str] = None  # 'power', 'speed', 'damage_taken'
     source_ability: Optional[Union[int, str]] = None  # Ability ID or Name that applied this
     stacks: int = 1  # Some buffs stack
+    source_pet_index: Optional[int] = None  # Index of pet that applied this (for Haunt/Life Exchange)
+    snapshot_hp: Optional[int] = None  # HP snapshot (for Haunt resurrection)
     
     def tick(self) -> bool:
         """Decrement duration, return True if still active"""
         self.duration -= 1
         return self.duration > 0
+
+    def clone(self) -> 'Buff':
+        """Fast copy"""
+        return Buff(
+            type=self.type,
+            duration=self.duration,
+            magnitude=self.magnitude,
+            name=self.name,
+            stat_affected=self.stat_affected,
+            source_ability=self.source_ability,
+            stacks=self.stacks,
+            source_pet_index=self.source_pet_index,
+            snapshot_hp=self.snapshot_hp
+        )
 
 
 
@@ -173,6 +199,11 @@ class Pet:
         for buff in self.active_buffs:
             if buff.stat_affected == 'speed':
                 speed = int(speed * buff.magnitude)
+            
+            # Speed Vulnerability: Underground/Flying pets have 0 speed
+            if buff.name in ["Underground", "Flying"]:
+                return 0
+                
         return speed
     
     def get_effective_power(self) -> int:
@@ -182,6 +213,29 @@ class Pet:
             if buff.stat_affected == 'power':
                 power = int(power * buff.magnitude)
         return power
+
+    def clone(self) -> 'Pet':
+        """Fast copy"""
+        new_pet = Pet(
+            species_id=self.species_id,
+            name=self.name,
+            family=self.family,
+            quality=self.quality,
+            stats=self.stats.clone(),
+            abilities=self.abilities  # Abilities are immutable/shared
+        )
+        # Copy mutable state
+        new_pet.active_buffs = [b.clone() for b in self.active_buffs]
+        new_pet.ability_cooldowns = self.ability_cooldowns.copy()
+        
+        # Copy racial state
+        new_pet.has_undead_revive = self.has_undead_revive
+        new_pet.revive_turns_remaining = self.revive_turns_remaining
+        new_pet.has_used_undead_revive = self.has_used_undead_revive
+        new_pet.has_used_mechanical_revive = self.has_used_mechanical_revive
+        new_pet.dragonkin_buff_ready = self.dragonkin_buff_ready
+        
+        return new_pet
 
 
 @dataclass
@@ -197,8 +251,12 @@ class Team:
 
     def copy(self) -> 'Team':
         """Create a deep copy of the team"""
+        return self.clone()
+
+    def clone(self) -> 'Team':
+        """Fast copy"""
         return Team(
-            pets=[copy.deepcopy(p) for p in self.pets],
+            pets=[p.clone() for p in self.pets],
             active_pet_index=self.active_pet_index
         )
     
@@ -225,7 +283,19 @@ class BattleState:
     
     def copy(self) -> 'BattleState':
         """Create deep copy for branching simulations"""
-        return copy.deepcopy(self)
+        return self.clone()
+
+    def clone(self) -> 'BattleState':
+        """Fast copy"""
+        new_state = BattleState(
+            player_team=self.player_team.clone(),
+            enemy_team=self.enemy_team.clone(),
+            turn_number=self.turn_number,
+            rng_seed=self.rng_seed
+        )
+        if self.weather:
+            new_state.weather = self.weather.clone()
+        return new_state
     
     def is_battle_over(self) -> bool:
         """Check if battle has ended"""

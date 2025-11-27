@@ -113,6 +113,12 @@ class DamageCalculator:
                 #     print(f"  → INVULNERABILITY DETECTED! Returning False")
                 return False
         
+        # Check accuracy buffs on attacker
+        accuracy_mod = 0.0
+        for buff in attacker.active_buffs:
+            if buff.type == BuffType.STAT_MOD and buff.stat_affected == 'accuracy':
+                accuracy_mod += buff.magnitude
+        
         # Check weather accuracy modifiers
         weather_mod = 0.0
         if weather and weather.type == BuffType.WEATHER:
@@ -136,7 +142,11 @@ class DamageCalculator:
         # Note: weather_mod is negative for penalty, so we add it? 
         # Formula: Chance = Accuracy + WeatherMod - Dodge
         # Example: 90% acc + (-10%) weather - 0% dodge = 80% chance
-        threshold = ability.accuracy + (weather_mod * 100) - (dodge_chance * 100)
+        # Calculate threshold: Accuracy - Dodge - WeatherPenalty + AccuracyBuffs
+        # Note: weather_mod is negative for penalty, so we add it? 
+        # Formula: Chance = Accuracy + WeatherMod - Dodge + AccuracyMod
+        # Example: 90% acc + (-10%) weather - 0% dodge + 50% buff = 130% chance
+        threshold = ability.accuracy + (weather_mod * 100) - (dodge_chance * 100) + (accuracy_mod * 100)
         
         return hit_roll <= threshold
     

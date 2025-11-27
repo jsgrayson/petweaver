@@ -102,10 +102,19 @@ class FitnessEvaluator:
         enemy_max_hp = sum(p.stats.max_hp for p in self.target_team.pets)
         slot_kills = [True, True, True]
 
+        total_turns = 0
+        min_turns = 999
+        max_turns = 0
+        
         for _ in range(num_battles):
             battle_state = BattleState(player_team.copy(), self.target_team.copy(), 1)
             result = self.simulator.simulate_battle(battle_state, genome_agent, enemy_agent, max_turns=45, enable_logging=False)
             
+            turns = result['turns']
+            total_turns += turns
+            if turns < min_turns: min_turns = turns
+            if turns > max_turns: max_turns = turns
+
             if result['turns'] >= 40:
                 for i in range(3): slot_kills[i] = False
                 continue
@@ -141,6 +150,13 @@ class FitnessEvaluator:
         status_chars = []
         for k in slot_kills: status_chars.append("W" if k else "L")
         genome.win_status = "".join(status_chars)
+        
+        # Attach detailed stats to genome for UI
+        if not hasattr(genome, 'stats'): genome.stats = {}
+        genome.stats['win_rate'] = wins / num_battles
+        genome.stats['avg_turns'] = total_turns / num_battles
+        genome.stats['min_turns'] = min_turns
+        genome.stats['max_turns'] = max_turns
         
         return total_score / num_battles
 
