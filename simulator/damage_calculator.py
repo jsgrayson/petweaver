@@ -97,10 +97,14 @@ class DamageCalculator:
         
         # Check dodge buffs on defender
         dodge_chance = 0.0
+        print(f"DEBUG: Checking buffs on {defender.name} (ID: {id(defender)}). Buff count: {len(defender.active_buffs)}")
         for buff in defender.active_buffs:
+            # DEBUG: Print buffs
+            print(f"DEBUG: Checking buff {buff.name} (Type: {buff.type}) on {defender.name}")
             if buff.type == BuffType.STAT_MOD and buff.stat_affected == 'dodge':
                 dodge_chance += buff.magnitude
             elif buff.type == BuffType.INVULNERABILITY:
+                print(f"DEBUG: {defender.name} is INVULNERABLE due to {buff.name}!")
                 return False
         
         # Check weather accuracy modifiers
@@ -205,6 +209,10 @@ class DamageCalculator:
         
         details['hit'] = True
         
+        # If ability has no power, it deals no damage (unless it's a special case handled elsewhere)
+        if ability.power == 0:
+            return 0, details
+        
         # Base damage formula: ability_power * (pet_power / 20)
         attacker_power = attacker.get_effective_power()
         base_damage = ability.power * (attacker_power / 20.0)
@@ -241,12 +249,24 @@ class DamageCalculator:
         variance = self.rng.uniform(0.95, 1.05)
         final_damage = int(base_damage * variance)
         
-        # Apply damage reduction buffs on defender
+        # Apply damage reduction/amplification buffs on defender
         damage_reduction = 1.0
+        flat_damage_mod = 0
+        
         for buff in defender.active_buffs:
-            if buff.type == BuffType.STAT_MOD and buff.stat_affected == 'damage_taken':
-                # Howl (2.0) and Shell Shield (0.5) are handled here multiplicatively
-                damage_reduction *= buff.magnitude
+            if buff.type == BuffType.STAT_MOD:
+                if buff.stat_affected == 'damage_taken':
+                    # Howl (2.0) and Shell Shield (0.5) are handled here multiplicatively
+                    damage_reduction *= buff.magnitude
+                elif buff.stat_affected == 'damage_taken_mult':
+                    # Shattered Defenses (Hunting Party)
+                    damage_reduction *= buff.magnitude
+                elif buff.stat_affected == 'damage_taken_flat':
+                    # Black Claw
+                    flat_damage_mod += buff.magnitude
+
+        final_damage = int(final_damage * damage_reduction)
+        final_damage += int(flat_damage_mod)
         
         # Check for Decoy/Block
         blocked = False

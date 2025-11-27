@@ -45,7 +45,7 @@ print(f"Target: Major Payne (3 Epic Pets)")
 
 # --- 3. Evolution Setup ---
 evaluator = FitnessEvaluator(target_team, abilities_db, species_db, target_name="Major Payne")
-engine = EvolutionEngine(evaluator, population_size=100, mutation_rate=0.5, elitism_rate=0.1)
+engine = EvolutionEngine(evaluator, population_size=100, mutation_rate=0.95, elitism_rate=0.1)  # High mutation for max diversity
 available_species = list(species_abilities.keys())
 
 # Meta Team: Iron Starlette (1155), Fel Flame (845), Emperor Crab (1194)

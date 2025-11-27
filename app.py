@@ -50,7 +50,7 @@ from market_manager import MarketManager
 from combat_manager import CombatManager
 
 # Initialize Managers
-strategy_manager = StrategyManager(os.path.join(os.path.dirname(__file__), "strategies_cleaned.json"))
+strategy_manager = StrategyManager(os.path.join(os.path.dirname(__file__), "strategies_master.json"))
 market_manager = MarketManager()
 combat_manager = CombatManager()
 
@@ -177,6 +177,34 @@ def get_all_pets():
 @app.route('/collection')
 def collection_page():
     return render_template('collection.html')
+
+# --- Smart Queue API ---
+from simulator.queue_manager import QueueManager
+queue_manager = QueueManager({}, {}) # Initialize with empty DBs for now, or pass loaded ones
+
+@app.route('/api/queue/next', methods=['POST'])
+def get_next_queue_team():
+    data = request.json
+    leveling_pet = data.get('leveling_pet')
+    target_id = data.get('target_id')
+    
+    # Mock target encounter lookup (replace with real DB lookup)
+    target_encounter = encounters.get(target_id, {'npc_pets': [{'family': 'Beast'}, {'family': 'Flying'}]})
+    
+    team = queue_manager.get_optimal_carry_team(leveling_pet, target_encounter)
+    return jsonify(team)
+
+@app.route('/api/queue/result', methods=['POST'])
+def report_queue_result():
+    data = request.json
+    # data: { win: bool, hp_remaining: int }
+    queue_manager.record_result(data)
+    efficiency = queue_manager.calculate_bandage_efficiency()
+    return jsonify({"status": "success", "efficiency": efficiency})
+
+@app.route('/queue')
+def queue_page():
+    return render_template('queue.html')
 
 def get_blizzard_client():
     """Returns a requests session with authentication headers, refreshing token if needed"""
@@ -891,16 +919,38 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
         evaluator.real_abilities = real_abilities
         evaluator.real_pet_stats = real_pet_stats
         evaluator.pt_base_stats = pt_base_stats # Pass PetTracker base stats
-        # 4. Initialize Evolution Engine
-        engine = EvolutionEngine(evaluator, population_size=pop_size)
-        
-        # Pass strategy manager for seeding
-        engine.initialize_population(
-            available_species, 
-            species_abilities, 
-            npc_name=target_name,
-            strategy_manager=strategy_manager
-        )
+            # 3. Initialize Evolution Engine
+            engine = EvolutionEngine(
+                fitness_evaluator=evaluator,
+                population_size=pop_size,
+                mutation_rate=0.5, # High mutation for exploration
+                elitism_rate=0.1
+            )
+            
+            # STRATEGY SEEDING: Check for known strategies
+            seed_teams = []
+            try:
+                # Use global strategy_manager initialized at top of app.py
+                recommended_ids = strategy_manager.get_recommended_team(target_name)
+                if recommended_ids and all(pid > 0 for pid in recommended_ids):
+                    genetic_state["log"].append(f"💡 Found known strategy! Seeding: {recommended_ids}")
+                    seed_teams.append(recommended_ids)
+                else:
+                    # Try similarity search (Placeholder for now)
+                    # similar_seeds = strategy_manager.find_similar_strategies(target_families=[p.family for p in target_team.pets])
+                    # if similar_seeds: seed_teams.extend(similar_seeds)
+                    pass
+            except Exception as e:
+                genetic_state["log"].append(f"⚠️ Strategy lookup failed: {e}")
+
+            genetic_state["log"].append(f"🧬 Initializing Population (Size: {pop_size})...")
+            engine.initialize_population(
+                available_species, 
+                real_abilities, # Use the merged ability DB
+                seed_teams=seed_teams,
+                npc_name=target_name,
+                strategy_manager=strategy_manager
+            )
         
         genetic_state["log"].append("🧬 Population Initialized")
         

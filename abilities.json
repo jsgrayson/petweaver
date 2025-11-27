@@ -7812,7 +7812,18 @@
       "cooldown": 4,
       "rounds": 1,
       "family_id": 0,
-      "power": 20,
+      "power": 0,
+      "accuracy": 100,
+      "speed": 0,
+      "priority": 5
+    },
+    "159": {
+      "id": 159,
+      "name": "Burrow",
+      "cooldown": 4,
+      "rounds": 2,
+      "family_id": 7,
+      "power": 0,
       "accuracy": 100,
       "speed": 0
     },

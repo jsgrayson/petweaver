@@ -1,5 +1,11 @@
-from typing import List, Dict
-from simulator import BattleSimulator, BattleState, Team, Pet, Ability, TurnAction, PetStats, PetFamily, PetQuality
+from typing import List, Dict, Any, Optional
+try:
+    from simulator import BattleSimulator, BattleState, Team, Pet, Ability, TurnAction, PetStats, PetFamily, PetQuality
+except ImportError:
+    from simulator import BattleSimulator, BattleState, Team, Pet, Ability, TurnAction, PetStats, PetFamily
+    class PetQuality:
+        POOR=0; COMMON=1; UNCOMMON=2; RARE=3; EPIC=4; LEGENDARY=5
+
 from .genome import TeamGenome
 
 class FitnessEvaluator:
@@ -9,377 +15,254 @@ class FitnessEvaluator:
         self.species_db = species_db
         self.npc_priorities = npc_priorities or {}
         self.target_name = target_name
-        self.simulator = BattleSimulator(rng_seed=None) # Random seed for variety
+        self.simulator = BattleSimulator(rng_seed=None) 
 
-    def evaluate(self, genome: TeamGenome, num_battles: int = 5) -> float:
-        """
-        Run simulations to determine fitness score.
-        Score = (Win Rate * 1000) + (Survival Bonus) - (Turn Penalty)
-        """
-        total_score = 0
-        
-        # Convert Genome to Playable Team
+    def _create_agents(self, genome: TeamGenome):
         player_team = self._genome_to_team(genome)
         
-        # Define Agent Function from Genome Strategy
         def genome_agent(state: BattleState) -> TurnAction:
-            active_pet_idx = state.player_team.active_pet_index
-            try:
-                pet_gene = genome.pets[active_pet_idx]
-                active_pet = state.player_team.pets[active_pet_idx]
-            except IndexError:
-                print(f"CRITICAL ERROR: active_pet_idx={active_pet_idx} out of range. Genome pets={len(genome.pets)}, Team pets={len(state.player_team.pets)}")
-                return TurnAction(actor='player', action_type='pass')
+            active_idx = state.player_team.active_pet_index
+            if active_idx >= len(state.player_team.pets): return TurnAction(actor='player', action_type='pass')
+            active_pet = state.player_team.pets[active_idx]
+            enemy_pet = state.enemy_team.get_active_pet()
             
-            # Check if active pet is dead -> Must Swap
+            # 1. Mandatory Swap (Dead)
             if not active_pet.stats.is_alive():
-                # Find next living pet
                 for i, p in enumerate(state.player_team.pets):
-                    if p.stats.is_alive():
-                        return TurnAction(actor='player', action_type='swap', target_pet_index=i)
-                return TurnAction(actor='player', action_type='pass') # No one left
-            
-            # Check conditions
-            for slot, (cond_type, cond_val) in pet_gene.strategy.conditions.items():
-                # Simplified condition check
-                if cond_type == 'enemy_hp_lt':
-                    enemy = state.enemy_team.get_active_pet()
-                    if enemy and (enemy.stats.current_hp / enemy.stats.max_hp * 100) < cond_val:
-                        # Try to use this slot
-                        ability_idx = slot - 1
-                        if 0 <= ability_idx < len(active_pet.abilities):
-                            ability = active_pet.abilities[ability_idx]
-                            if active_pet.can_use_ability(ability):
-                                return TurnAction(actor='player', action_type='ability', ability=ability)
+                    if p.stats.is_alive(): return TurnAction(actor='player', action_type='swap', target_pet_index=i)
+                return TurnAction(actor='player', action_type='pass')
 
-            # Fallback to priority list
-            for slot in pet_gene.strategy.priority:
-                ability_idx = slot - 1
-                if 0 <= ability_idx < len(active_pet.abilities):
-                    ability = active_pet.abilities[ability_idx]
-                    if active_pet.can_use_ability(ability):
-                        return TurnAction(actor='player', action_type='ability', ability=ability)
+            if enemy_pet and enemy_pet.stats.is_alive():
+                # 2. DEFENSIVE REFLEXES
+                danger_buffs = ["Wind-Up", "Supercharge", "Pump", "Lock-On", "Geyser", "Whirlpool"]
+                is_danger = False
+                for buff in enemy_pet.active_buffs:
+                     if any(d in buff.name for d in danger_buffs): is_danger = True
+                
+                for buff in active_pet.active_buffs:
+                    if "Bomb" in buff.name and buff.duration <= 1: is_danger = True
+
+                if is_danger:
+                    defensives = ["Dodge", "Decoy", "Deflection", "Burrow", "Lift-Off", "Evanescence", "Bubble"]
+                    for ab in active_pet.abilities:
+                        if active_pet.can_use_ability(ab) and any(d in ab.name for d in defensives):
+                            return TurnAction(actor='player', action_type='ability', ability=ab)
+                
+                # 3. EXECUTE
+                for ab in active_pet.abilities:
+                    if active_pet.can_use_ability(ab):
+                        if ab.power >= enemy_pet.stats.current_hp:
+                            return TurnAction(actor='player', action_type='ability', ability=ab)
+
+                # 4. MATCHUP SWAP
+                if enemy_pet.stats.current_hp > 300:
+                    incoming_mult = self.simulator.damage_calc.get_family_multiplier(enemy_pet.family, active_pet.family)
+                    if incoming_mult > 1.0:
+                        best_swap = -1
+                        best_score = -100
+                        for i, p in enumerate(state.player_team.pets):
+                            if i == active_idx or not p.stats.is_alive(): continue
+                            def_mod = self.simulator.damage_calc.get_family_multiplier(enemy_pet.family, p.family)
+                            off_mod = self.simulator.damage_calc.get_family_multiplier(p.family, enemy_pet.family)
+                            score = 0
+                            if def_mod < 1.0: score += 10 
+                            if def_mod > 1.0: score -= 5
+                            if off_mod > 1.0: score += 5
+                            if score > best_score and score > 0:
+                                best_score = score
+                                best_swap = i
+                        if best_swap != -1:
+                            return TurnAction(actor='player', action_type='swap', target_pet_index=best_swap)
+
+            try:
+                pet_gene = genome.pets[active_idx]
+                for slot in pet_gene.strategy.priority:
+                    idx = slot - 1
+                    if 0 <= idx < len(active_pet.abilities):
+                        abil = active_pet.abilities[idx]
+                        if active_pet.can_use_ability(abil): return TurnAction(actor='player', action_type='ability', ability=abil)
+            except: pass
             
+            if active_pet.abilities: return TurnAction(actor='player', action_type='ability', ability=active_pet.abilities[0])
             return TurnAction(actor='player', action_type='pass')
 
-
-        # Enemy Agent - Use SmartEnemyAgent for consistent behavior
-        from .agents import create_smart_enemy_agent
         from simulator.npc_ai import create_npc_agent
-        
-        # Pass priorities if available
-        # Note: npc_priorities is Dict[int, List[int]] mapping pet_idx -> ability_ids
-        # We need to ensure keys are integers
-        priorities = {int(k): v for k, v in self.npc_priorities.items()} if self.npc_priorities else None
-        base_agent = create_smart_enemy_agent(difficulty=1.0, ability_priorities=priorities)
-        enemy_agent = create_npc_agent(self.target_name, base_agent)
+        from simulator.smart_agent import SmartAgent
+        enemy_agent = create_npc_agent(self.target_name, SmartAgent(1.0).decide)
+        return player_team, genome_agent, enemy_agent
 
-        # Run Battles
-        wins = 0
-        total_turns = 0
-        total_survival = 0
-        
-        # Track performance even in losses
-        total_damage_dealt = 0
-        total_enemy_hp_removed = 0
-        
-        # Accumulate ability stats across all battles for averaging
-        total_power = 0
-        total_accuracy = 0
-        total_speed = 0
-        total_cooldown = 0
-        ability_count = 0
-        
+    def evaluate(self, genome: TeamGenome, num_battles: int = 5) -> float:
+        player_team, genome_agent, enemy_agent = self._create_agents(genome)
+        if not player_team or not player_team.pets: return 0.0
+
+        total_score = 0
+        total_wins = 0
+        enemy_max_hp = sum(p.stats.max_hp for p in self.target_team.pets)
+        kill_counts = [0, 0, 0]
+        valid_kill_counts = [0, 0, 0]
+
         for _ in range(num_battles):
-            # Reset teams for fresh battle
-            battle_state = BattleState(
-                player_team=player_team.copy(), # Important: fresh copy
-                enemy_team=self.target_team.copy(),
-                turn_number=1
-            )
+            battle_state = BattleState(player_team.copy(), self.target_team.copy(), 1)
+            result = self.simulator.simulate_battle(battle_state, genome_agent, enemy_agent, max_turns=45, enable_logging=False)
             
-            # Adaptive Mulligan (Run only on first battle to save time, or every battle?)
-            # Since teams are reset, the optimal starter should be the same every time unless RNG varies wildly.
-            # Let's run it on the first battle and reuse the index? 
-            # Or run it every time if we want to test consistency.
-            # For performance, let's run it once per evaluation (before the loop) or just for the first battle.
-            # Actually, let's run it for the first battle and assume it sticks.
-            if _ == 0:
-                best_start_idx = self.simulator.simulate_mulligan(
-                    battle_state, 
-                    genome_agent, 
-                    enemy_agent, 
-                    depth=3
-                )
-                # Apply best start
-                battle_state.player_team.active_pet_index = best_start_idx
-                # Also update the player_team template so subsequent battles use it?
-                player_team.active_pet_index = best_start_idx
-            else:
-                # Use the cached best start from player_team template
-                battle_state.player_team.active_pet_index = player_team.active_pet_index
-            
-            result = self.simulator.simulate_battle(battle_state, genome_agent, enemy_agent, max_turns=30)
-            
-            # Track damage dealt to enemy (even in losses)
-            enemy_max_hp = sum(p.stats.max_hp for p in self.target_team.pets)
-            enemy_remaining_hp = sum(p.stats.current_hp for p in result['final_state'].enemy_team.pets)
-            damage_dealt = enemy_max_hp - enemy_remaining_hp
-            
-            # Debug logging for first battle to diagnose issues
-            if _ == 0:
-                species_summary = ", ".join([str(p.species_id) for p in genome.pets])
-                print(f"[FITNESS] Team [{species_summary}] Battle 1: Winner={result['winner']}, "
-                      f"Damage={damage_dealt}/{enemy_max_hp} ({damage_dealt/enemy_max_hp*100:.1f}%), "
-                      f"Turns={result['turns']}")
+            if result['turns'] >= 40:
+                return 1.0 # Stalemate penalty
 
-            total_damage_dealt += damage_dealt
-            total_enemy_hp_removed += (damage_dealt / enemy_max_hp)  # Normalized 0-1
+            # Analyze Death Turns for Strict Gauntlet
+            p_death_turns = [999, 999, 999] # Default to 999 (survived)
+            e_death_turns = [999, 999, 999]
+            
+            for event in result.get('events', []):
+                if event['type'] == 'death':
+                    turn = event['turn']
+                    pet_name = event['pet']
+                    
+                    # Find which pet died
+                    # We need to map names back to slots. 
+                    # This is tricky if names are duplicate, but assuming unique names for now or using index if available.
+                    # Simulator events currently store 'pet' name.
+                    # Better to check the final state or track IDs.
+                    # Heuristic: Check names against initial teams.
+                    
+                    for i, p in enumerate(player_team.pets):
+                        if p.name == pet_name: p_death_turns[i] = turn
+                    for i, p in enumerate(self.target_team.pets):
+                        if p.name == pet_name: e_death_turns[i] = turn
+
+            if result.get('final_state'):
+                enemy_team = result['final_state'].enemy_team
+                for i, p in enumerate(enemy_team.pets):
+                    if not p.stats.is_alive(): 
+                        kill_counts[i] += 1
+                        # Strict Gauntlet Check: Did Player I outlive Enemy I?
+                        # Or did Player I die on the same turn (Trade)?
+                        if p_death_turns[i] >= e_death_turns[i]:
+                            valid_kill_counts[i] += 1
+
+            battle_score = 0
+            if result.get('final_state'):
+                enemy_rem = sum(p.stats.current_hp for p in result['final_state'].enemy_team.pets)
+                dmg_pct = (enemy_max_hp - enemy_rem) / max(1, enemy_max_hp)
+                battle_score += (dmg_pct * 5000)
+                
+                for i, enemy_p in enumerate(result['final_state'].enemy_team.pets):
+                    if not enemy_p.stats.is_alive():
+                         battle_score += 2000 * (2 ** i)
+
+                surviving = sum(1 for p in result['final_state'].player_team.pets if p.stats.is_alive())
+                battle_score += (surviving * 500)
             
             if result['winner'] == 'player':
-                wins += 1
-                total_turns += result['turns']
-                
-                # Calculate survival %
-                surviving_hp = sum(p.stats.current_hp for p in result['final_state'].player_team.pets)
-                max_hp = sum(p.stats.max_hp for p in result['final_state'].player_team.pets)
-                total_survival += (surviving_hp / max_hp)
+                total_wins += 1
+                battle_score += 20000
+                battle_score += (40 - min(result['turns'], 40)) * 100
+
+            total_score += battle_score
+
+        # CONSISTENCY CHECK
+        if total_wins < num_battles:
+            total_score *= 0.5
             
-            # Gather ability stats from ALL teams (not just winners)
-            for pet in result['final_state'].player_team.pets:
-                for ab in pet.abilities:
-                    total_power += ab.power
-                    total_accuracy += ab.accuracy
-                    total_speed += ab.speed
-                    total_cooldown += ab.cooldown
-                    ability_count += 1
-        # Calculate Final Score
-        win_rate = wins / num_battles
-        avg_turns = total_turns / wins if wins > 0 else 30
-        avg_survival = total_survival / wins if wins > 0 else 0
-        avg_damage_pct = total_enemy_hp_removed / num_battles  # Average % of enemy HP removed
+        # Generate Win Status based on Consistency (Majority Rule) AND Strict Gauntlet
+        # Rule: Slot I is 'W' only if:
+        # 1. Enemy I is dead in >50% of battles.
+        # 2. Player I outlived Enemy I (or traded) in those battles.
         
-        # Ability-stat averages (guard against division by zero)
-        if ability_count > 0:
-            avg_power = total_power / ability_count
-            avg_accuracy = total_accuracy / ability_count
-            avg_speed = total_speed / ability_count
-            avg_cooldown = total_cooldown / ability_count
-        else:
-            avg_power = avg_accuracy = avg_speed = avg_cooldown = 0
+        final_win_status = ["L", "L", "L"]
+        threshold = num_battles / 2.0
         
-        # Weighted fitness (tweakable coefficients)
-        # Give every genome a minimal baseline so it can be ranked even if it never wins
-        score = 1
-        
-        # Primary win-rate component (huge bonus for wins)
-        score += (win_rate * 1000)
-        
-        # IMPORTANT: Reward damage dealt even in losses (this differentiates losing teams)
-        score += (avg_damage_pct * 200)  # Up to 200 points for dealing 100% of enemy HP
-        
-        if wins > 0:
-            # Healthy team bonus
-            score += (avg_survival * 500)
-            # Slower wins penalty
-            score -= (avg_turns * 10)
-            
-            # Trivial win penalty (suspiciously fast wins suggest broken mechanics)
-            if avg_turns < 5:
-                score *= 0.5  # Reduce score by 50% for unrealistic wins
-        
-        # Reward ability quality (applies to all teams)
-        score += (avg_power * 2)
-        score += (avg_accuracy * 1)
-        score += (avg_speed * 0.5)
-        # Penalise long cooldowns
-        score -= (avg_cooldown * 5)
-        
-        # Add diversity bonus: reward unique species combinations (BOOSTED)
-        unique_families = len(set(p.species_id for p in genome.pets))
-        score += unique_families * 10  # Was 2, now 10 for better differentiation
-        
-        # Type Advantage Bonus: Prefer pets with type advantage, avoid disadvantage
-        # WoW Pet Battle type effectiveness: Strong = 1.5x damage, Weak = 0.67x damage
-        type_advantage_bonus = self._calculate_type_matchup_bonus(player_team, self.target_team)
-        score += type_advantage_bonus
-        
-        # Add tiny random noise to break ties
-        import random
-        score += random.uniform(0, 0.5)
-        
-        # Store detailed stats for UI
-        genome.stats = {
-            "win_rate": win_rate,
-            "avg_damage_pct": avg_damage_pct,
-            "avg_turns": avg_turns,
-            "avg_survival": avg_survival
-        }
-        
-        return max(0, score)
+        for i in range(3):
+            # Check if Enemy I died consistently
+            if kill_counts[i] > threshold:
+                # Check if Player I consistently did their job (outlived Enemy I)
+                # We track "valid kills" where Player I death >= Enemy I death
+                if valid_kill_counts[i] > threshold:
+                    final_win_status[i] = "W"
+
+        genome.win_status = "".join(final_win_status)
+        return total_score / num_battles
+
+    def play_battle(self, genome: TeamGenome, enable_logging: bool = False) -> Dict:
+        player_team, genome_agent, enemy_agent = self._create_agents(genome)
+        battle_state = BattleState(player_team.copy(), self.target_team.copy(), 1)
+        return self.simulator.simulate_battle(battle_state, genome_agent, enemy_agent, max_turns=50, enable_logging=enable_logging)
 
     def _genome_to_team(self, genome: TeamGenome) -> Team:
-        """Convert DNA to actual Team object with REAL individual pet stats"""
         pets = []
-        for gene in genome.pets:
-            # Use REAL stats from user's collection (breed matters!)
-            if hasattr(self, 'real_pet_stats') and gene.species_id in self.real_pet_stats:
-                species_stats = self.real_pet_stats[gene.species_id]
-                stats = PetStats(
-                    max_hp=species_stats['health'],
-                    current_hp=species_stats['health'],
-                    power=species_stats['power'],
-                    speed=species_stats['speed']
-                )
-            # Use PetTracker Base Stats for unowned pets
-            elif hasattr(self, 'pt_base_stats') and str(gene.species_id) in self.pt_base_stats:
-                base = self.pt_base_stats[str(gene.species_id)]
-                # Calculate Level 25 Rare (Blue) stats
-                # Formula approximation:
-                # HP = Base * 17.5? No, usually Base * 10 + 100?
-                # Let's use standard multipliers for Level 25 Rare:
-                # HP ~= Base * 100 (No, that's too high). 
-                # Base stats in PetTracker are usually 7-9 range.
-                # Real stats are ~1400. 1400 / 8 = 175.
-                # Power ~280 / 8 = 35.
-                # Speed ~280 / 8 = 35.
+        
+        # Load breed stats if not already loaded
+        if not hasattr(self, 'breed_stats'):
+            try:
+                import json
+                with open('breed_stats.json') as f:
+                    breed_data = json.load(f)
+                    self.breed_stats = breed_data['breeds']
+            except:
+                self.breed_stats = {}
+        
+        for pet_gene in genome.pets:
+            species_data = self.species_db.get(str(pet_gene.species_id)) or self.species_db.get(pet_gene.species_id)
+            if species_data and 'base_stats' in species_data:
+                base = species_data['base_stats']
+                base_hp = base.get('health', 8)
+                base_power = base.get('power', 8)
+                base_speed = base.get('speed', 8)
                 
-                # Using 175, 35, 35 multipliers as per plan
-                hp = int(base.get('health', 8) * 175)
-                power = int(base.get('power', 8) * 35)
-                speed = int(base.get('speed', 8) * 35)
-                
-                stats = PetStats(
-                    max_hp=hp,
-                    current_hp=hp,
-                    power=power,
-                    speed=speed
-                )
-            else:
-                # Fallback to level 25 rare baseline
-                stats = PetStats(
-                    max_hp=1400,
-                    current_hp=1400,
-                    power=280,
-                    speed=280
-                )
-            
-            abilities = []
-            for i, ab_id in enumerate(gene.abilities):
-                # Check if we have real ability data (monkey-patched from app.py)
-                if hasattr(self, 'real_abilities') and str(ab_id) in self.real_abilities:
-                    info = self.real_abilities[str(ab_id)]
-                    
-                    # Map API family ID to Enum
-                    fam_map = {
-                        0: PetFamily.HUMANOID, 1: PetFamily.DRAGONKIN, 2: PetFamily.FLYING,
-                        3: PetFamily.UNDEAD, 4: PetFamily.CRITTER, 5: PetFamily.MAGIC,
-                        6: PetFamily.ELEMENTAL, 7: PetFamily.BEAST, 8: PetFamily.AQUATIC,
-                        9: PetFamily.MECHANICAL
-                    }
-                    fam = fam_map.get(info.get('family_id', 0), PetFamily.BEAST)
-                    
-                    # Use real parsed stats from Blizzard API
-                    abilities.append(Ability(
-                        id=int(info['id']),
-                        name=info['name'],
-                        power=info.get('power', 20),  # Real power value from API parse
-                        accuracy=info.get('accuracy', 100),  # Real accuracy from API parse
-                        speed=info.get('speed', 0),  # Real speed modifier from API parse
-                        cooldown=info.get('cooldown', 0),
-                        family=fam,
-                        stat_buffs=info.get('stat_buffs', {})
-                    ))
+                # Apply breed modifiers
+                breed_id = str(pet_gene.breed_id)
+                if breed_id in self.breed_stats:
+                    breed = self.breed_stats[breed_id]
+                    hp_mod = breed.get('hp_modifier', 0.0)
+                    power_mod = breed.get('power_modifier', 0.0)
+                    speed_mod = breed.get('speed_modifier', 0.0)
                 else:
-                    # Fallback to mock
+                    hp_mod = power_mod = speed_mod = 0.0
+                
+                # Calculate level 25 rare stats with breed modifiers
+                # Formula: ((base_stat * 5 + 100) * quality_modifier * breed_modifier) * level + constant
+                # Quality modifier for Rare = 1.3
+                # Level 25
+                hp = int((base_hp * 5 * 25 * 1.3 * (1 + hp_mod)) + 100)
+                power = int(base_power * 25 * 1.3 * (1 + power_mod))
+                speed = int(base_speed * 25 * 1.3 * (1 + speed_mod))
+                
+                name = species_data.get('name', f"Pet {pet_gene.species_id}")
+                family_id = species_data.get('family_id', 7)
+            else:
+                hp, power, speed = 1400, 260, 260
+                name = f"Unknown {pet_gene.species_id}"
+                family_id = 7
+
+            stats = PetStats(max_hp=hp, current_hp=hp, power=power, speed=speed)
+            abilities = []
+            for ab_id in pet_gene.abilities:
+                ab_info = self.ability_db.get(str(ab_id)) or self.ability_db.get(ab_id)
+                if ab_info:
+                    if isinstance(ab_info, list):
+                        ab_info = {'id': ab_id, 'name': str(ab_info[1]) if len(ab_info)>1 else "Unknown", 'family_id': 7, 'power': 20, 'accuracy': 100, 'cooldown': 0, 'speed': 0}
+                    fam_val = ab_info.get('family_id', 7)
+                    try: fam = PetFamily(fam_val)
+                    except: fam = PetFamily.BEAST
+                    
                     abilities.append(Ability(
                         id=ab_id, 
-                        name=f"Ability {ab_id}", 
-                        power=20, 
-                        accuracy=100, 
-                        speed=0, 
-                        cooldown=0, 
-                        family=PetFamily.BEAST
+                        name=ab_info.get('name', 'Unknown'), 
+                        power=ab_info.get('power', 20), 
+                        accuracy=ab_info.get('accuracy', 100), 
+                        speed=ab_info.get('speed', 0), 
+                        cooldown=ab_info.get('cooldown', 0), 
+                        family=fam,
+                        effect_type=ab_info.get('effect_type'),
+                        is_heal=ab_info.get('is_heal', False),
+                        priority=ab_info.get('priority', 0)
                     ))
-                
-            # Determine pet family from species_db
-            pet_family = PetFamily.BEAST  # Default
-            if gene.species_id in self.species_db:
-                family_id = self.species_db[gene.species_id].get('family_id', 7)
-                # Map family_id to PetFamily enum
-                family_map = {
-                    0: PetFamily.HUMANOID,
-                    1: PetFamily.DRAGONKIN,
-                    2: PetFamily.FLYING,
-                    3: PetFamily.UNDEAD,
-                    4: PetFamily.CRITTER,
-                    5: PetFamily.MAGIC,
-                    6: PetFamily.ELEMENTAL,
-                    7: PetFamily.BEAST,
-                    8: PetFamily.AQUATIC,
-                    9: PetFamily.MECHANICAL
-                }
-                pet_family = family_map.get(family_id, PetFamily.BEAST)
-                
-            pets.append(Pet(
-                species_id=gene.species_id,
-                name=f"Pet {gene.species_id}",
-                family=pet_family,  # Now using correct family from species_db
-                quality=PetQuality.RARE,  # Add missing quality parameter
-                stats=stats,
-                abilities=abilities
-            ))
-            
+                    if ab_id == 124: # Rampage
+                         print(f"DEBUG: Loaded Rampage: is_heal={abilities[-1].is_heal}, power={abilities[-1].power}")
+                else:
+                    abilities.append(Ability(id=ab_id, name="Unknown", power=20, accuracy=100, speed=0, cooldown=0, family=PetFamily.BEAST))
+
+            try: pet_family = PetFamily(family_id)
+            except: pet_family = PetFamily.BEAST
+            pets.append(Pet(species_id=pet_gene.species_id, name=name, family=pet_family, stats=stats, abilities=abilities, quality=PetQuality.RARE))
+        
         return Team(pets=pets)
-    
-    def _calculate_type_matchup_bonus(self, player_team: Team, enemy_team: Team) -> float:
-        """
-        Calculate type advantage bonus based on team composition vs enemy types.
-        Returns positive bonus for advantages, negative for disadvantages.
-        
-        WoW Pet Battle Type Chart (Strong against):
-        - Humanoid > Dragonkin, Undead
-        - Dragonkin > Magic, Flying
-        - Flying > Aquatic, Critter
-        - Undead > Humanoid, Critter
-        - Critter > Undead
-        - Magic > Flying, Mechanical
-        - Elemental > Mechanical, Critter
-        - Beast > Critter, Mechanical
-        - Aquatic > Elemental, Undead
-        - Mechanical > Beast, Elemental
-        """
-        # Type effectiveness matrix: key attacks value
-        strong_against = {
-            PetFamily.HUMANOID: {PetFamily.DRAGONKIN, PetFamily.UNDEAD},
-            PetFamily.DRAGONKIN: {PetFamily.MAGIC, PetFamily.FLYING},
-            PetFamily.FLYING: {PetFamily.AQUATIC, PetFamily.CRITTER},
-            PetFamily.UNDEAD: {PetFamily.HUMANOID, PetFamily.CRITTER},
-            PetFamily.CRITTER: {PetFamily.UNDEAD},
-            PetFamily.MAGIC: {PetFamily.FLYING, PetFamily.MECHANICAL},
-            PetFamily.ELEMENTAL: {PetFamily.MECHANICAL, PetFamily.CRITTER},
-            PetFamily.BEAST: {PetFamily.CRITTER, PetFamily.MECHANICAL},
-            PetFamily.AQUATIC: {PetFamily.ELEMENTAL, PetFamily.UNDEAD},
-            PetFamily.MECHANICAL: {PetFamily.BEAST, PetFamily.ELEMENTAL}
-        }
-        
-        bonus = 0
-        
-       # Count advantages and disadvantages
-        for player_pet in player_team.pets:
-            player_family = player_pet.family
-            
-            for enemy_pet in enemy_team.pets:
-                enemy_family = enemy_pet.family
-                
-                # Check if player pet has advantage
-                if player_family in strong_against:
-                    if enemy_family in strong_against[player_family]:
-                        bonus += 50  # Reward type advantage
-                
-                # Check if player pet has disadvantage (enemy strong against player)
-                if enemy_family in strong_against:
-                    if player_family in strong_against[enemy_family]:
-                        bonus -= 30  # Penalize type disadvantage
-        
-        return bonus

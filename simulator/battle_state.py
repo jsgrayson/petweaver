@@ -125,6 +125,9 @@ class Buff:
         return self.duration > 0
 
 
+
+
+
 @dataclass
 class Pet:
     """Complete pet state"""
@@ -138,7 +141,9 @@ class Pet:
     # Combat state
     active_buffs: List[Buff] = field(default_factory=list)
     ability_cooldowns: Dict[int, int] = field(default_factory=dict)  # ability_id: turns_remaining
-    
+
+
+
     # Racial passive state tracking
     has_undead_revive: bool = False  # Currently in revive state (1 extra turn)
     revive_turns_remaining: int = 0  # Turns remaining for Undead revive

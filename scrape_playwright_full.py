@@ -1,233 +1,246 @@
-"""
-FULL-SCALE Playwright scraper for ALL Xu-Fu encounters.
-Fast, respectful, and saves pristine data.
-"""
-
 import json
+import re
 import time
-from playwright.sync_api import sync_playwright
 from datetime import datetime
+from playwright.sync_api import sync_playwright
 
-class FullXuFuScraper:
+class XuFuBrowserScraper:
     def __init__(self):
         self.base_url = "https://www.wow-petguide.com"
+        self.data = {}
         
-        # All categories to scrape - COMPLETE LIST
-        self.categories = {
-            "The War Within": {
-                "World Quests": "/Section/104/World_Quests",
-                "The Undermine": "/Section/110/The_Undermine"
-            },
-            "Dragonflight": {
-                "World Quests": "/Section/97/World_Quests",
-                "The Forbidden Reach": "/Section/99/The_Forbidden_Reach",
-                "Zaralek Cavern": "/Section/100/Zaralek_Cavern"
-            },
-            "Shadowlands": {
-                "World Quests": "/Section/80/World_Quests",
-                "Covenant Adventures": "/Section/85/Covenant_Adventures",
-                "Torghast": "/Section/87/Torghast_Tower_of_the_Damned",
-                "Family Exorcist": "/Section/89/Family_Exorcist"
-            },
-            "BfA": {
-                "World Quests": "/Section/64/World_Quests",
-                "Island Expeditions": "/Section/68/Island_Expeditions",
-                "Warfronts": "/Section/69/Warfronts",
-                "Family Battler": "/Section/71/Battle_for_Azeroth_Family_Battler",
-                "Nazjatar & Mechagon": "/Section/72/Nazjatar_and_Mechagon"
-            },
-            "Legion": {
-                "World Quests": "/Section/49/World_Quests",
-                "Family Familiar": "/Section/51/Family_Familiar",
-                "Broken Isles": "/Section/48/Broken_Isles_Tamers"
-            },
-            "Draenor": {
-                "Garrison": "/Section/36/Garrison",
-                "The Menagerie": "/Section/37/The_Menagerie",
-                "Tamers": "/Section/38/Draenor_Tamers"
-            },
-            "Pandaria": {
-                "Spirit Tamers": "/Section/19/Pandaren_Spirit_Tamers",
-                "Beasts of Fable": "/Section/20/Beasts_of_Fable",
-                "Tamers": "/Section/21/Tamers",
-                "Celestial Tournament": "/Section/22/Celestial_Tournament"
-            },
-            "Dungeons": {
-                "Wailing Caverns": "/Section/54/Wailing_Caverns",
-                "Deadmines": "/Section/55/Deadmines",
-                "Stratholme": "/Section/73/Stratholme",
-                "Blackrock Depths": "/Section/74/Blackrock_Depths",
-                "Gnomeregan": "/Section/75/Gnomeregan"
-            },
-            "Misc": {
-                "Darkmoon Faire": "/Section/25/Darkmoon_Faire"
-            }
-        }
-    
-    def extract_teams(self, page):
-        """Extract all teams from encounter page"""
-        teams = []
+    def auto_scroll(self, page):
+        """Scrolls to bottom of page to trigger lazy loading."""
+        last_height = page.evaluate("document.body.scrollHeight")
+        while True:
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(1000)
+            new_height = page.evaluate("document.body.scrollHeight")
+            if new_height == last_height:
+                break
+            last_height = new_height
+
+    def scrape_encounter_page(self, page, url):
+        print(f"  Visiting: {url}")
         try:
-            page.click('text="Browse all alternatives"', timeout=8000)
-            page.wait_for_timeout(500)
+            page.goto(url, wait_until="domcontentloaded")
+            # Force desktop view
+            page.set_viewport_size({"width": 1920, "height": 1080})
+            page.wait_for_timeout(2000) # Wait for JS
             
-            # Scroll modal
-            page.evaluate("""
-                const modal = document.getElementById('alternatives_window');
-                if (modal) modal.scrollTop = modal.scrollHeight;
-            """)
-            page.wait_for_timeout(300)
-            
-            # Extract teams
-            teams_json = page.evaluate("""
-                (() => {
-                    const table = document.getElementById('alternatives_window');
-                    if (!table) return '[]';
-                    const rows = table.querySelectorAll('tr');
-                    const teams = [];
-                    rows.forEach(row => {
-                        const petDivs = row.querySelectorAll('td:first-child > div');
-                        const team = [];
-                        petDivs.forEach(div => {
-                            const link = div.querySelector('a');
-                            const img = div.querySelector('img');
-                            if (link) {
-                                const href = link.getAttribute('href');
-                                let name = '[Unknown]';
-                                let id = 0;
-                                const match = href.match(/\\/Pet\\/(\\d+)\\/(.*)/);
-                                if (match) {
-                                    id = parseInt(match[1]);
-                                    name = match[2].replace(/_/g, ' ');
-                                }
-                                team.push({ name, id });
-                            } else if (img && img.getAttribute('alt') === 'Leveling Pet') {
-                                team.push({ name: '[Empty/Leveling]', id: 0 });
-                            }
-                        });
-                        if (team.length === 3) teams.push(team);
-                    });
-                    return JSON.stringify(teams);
-                })()
-            """)
-            
-            teams = json.loads(teams_json)
+            # Try to close cookie banner if present
             try:
-                page.keyboard.press('Escape')
-                page.wait_for_timeout(200)
-            except:
-                pass
+                page.locator("button:has-text('Agree')").click(timeout=1000)
+            except: pass
+
         except Exception as e:
-            print(f"    Warning: Alternatives extraction failed")
-        
-        return teams
-    
-    def teams_to_slots(self, teams):
-        """Convert teams to pet_slots format"""
-        if not teams:
+            print(f"    ! Error loading page: {e}")
             return []
+
+        strategies = []
         
-        slot1, slot2, slot3 = set(), set(), set()
+        # 1. Find Strategy Switchers (Broad Selectors)
+        # We look for standard Bootstrap tabs OR list groups (sidebars)
+        potential_tabs = page.locator('a.nav-link, ul.nav li a, .list-group-item-action')
         
-        for team in teams:
-            if len(team) >= 3:
-                slot1.add((team[0]['name'], team[0]['id']))
-                slot2.add((team[1]['name'], team[1]['id']))
-                slot3.add((team[2]['name'], team[2]['id']))
+        count = potential_tabs.count()
         
-        return [
-            [{'name': n, 'id': i} for n, i in slot1 if i != 0 or n == '[Empty/Leveling]'],
-            [{'name': n, 'id': i} for n, i in slot2 if i != 0 or n == '[Empty/Leveling]'],
-            [{'name': n, 'id': i} for n, i in slot3 if i != 0 or n == '[Empty/Leveling]']
-        ]
-    
-    def scrape_all(self):
-        """Scrape ALL encounters from all expansions"""
-        all_data = {}
-        total_enc = 0
-        total_teams = 0
+        if count > 0:
+            # We found tabs/buttons. Let's iterate them.
+            # Note: The "Description" or "Comments" tabs might be included, we filter them.
+            
+            # We use a set of seen script signatures to avoid duplicates
+            seen_scripts = set()
+
+            for i in range(count):
+                try:
+                    tab = potential_tabs.nth(i)
+                    if not tab.is_visible(): continue
+                    
+                    tab_text = tab.inner_text().strip()
+                    # Skip navigation/irrelevant tabs
+                    if any(x in tab_text for x in ["Comment", "Discussion", "Log", "Export", "Guide", "Home"]):
+                        continue
+                        
+                    # Filter: Strategy tabs usually have numbers or specific names
+                    # If it's a generic nav link (like "Discord"), skip it
+                    href = tab.get_attribute('href')
+                    if href and "http" in href and "wow-petguide" not in href: continue
+
+                    # Click to load strategy
+                    # Use force=True to bypass simple overlays
+                    tab.click(force=True)
+                    page.wait_for_timeout(500) 
+                    
+                    # Find the active content container
+                    # Xu-Fu usually puts content in .tab-pane.active
+                    # But sometimes it's just the main body if it's a page reload
+                    active_pane = page.locator('.tab-pane.active, #main-content').first
+                    
+                    if active_pane.count() > 0:
+                        strat_data = self._extract_data_from_pane(active_pane, tab_text)
+                        
+                        # Deduplicate based on script content
+                        if strat_data['script'] and strat_data['script'] not in seen_scripts:
+                            strategies.append(strat_data)
+                            seen_scripts.add(strat_data['script'])
+                            
+                except Exception as e:
+                    # Ignore click errors (some nav links might not be tabs)
+                    pass
         
+        # Fallback: If no tabs yielded results (or no tabs found), scrape current view
+        if not strategies:
+            print("    No strategy tabs found/processed. Scraping main view...")
+            main_content = page.locator('body')
+            strat_data = self._extract_data_from_pane(main_content, "Default Strategy")
+            if strat_data['pet_slots'] or strat_data['script']:
+                strategies.append(strat_data)
+
+        print(f"    -> Captured {len(strategies)} unique strategies.")
+        return strategies
+
+    def _extract_data_from_pane(self, pane, name):
+        strategy = {'name': name, 'pet_slots': [], 'script': ''}
+        
+        # 1. Extract Pets
+        pets = []
+        # Look for pet links visible in the pane
+        # 'bt_petdetails' is the class Xu-Fu uses for pet links
+        pet_links = pane.locator('a.bt_petdetails').all()
+        
+        for link in pet_links:
+            if not link.is_visible(): continue
+            
+            p_name = link.inner_text().strip()
+            href = link.get_attribute('href')
+            p_id = 0
+            if href:
+                match = re.search(r'/Pet/(\d+)/', href)
+                if match: p_id = int(match.group(1))
+            pets.append({'name': p_name, 'id': p_id})
+            
+        # Remove duplicates while preserving order
+        unique_pets = []
+        seen = set()
+        for p in pets:
+            if p['id'] not in seen:
+                seen.add(p['id'])
+                unique_pets.append(p)
+        pets = unique_pets
+
+        # Slot Heuristic (3 slots)
+        if len(pets) >= 3:
+            slot1, slot2, slot3 = [pets[0]], [pets[1]], [pets[2]]
+            # Alternatives often follow the main 3
+            for i, p in enumerate(pets[3:]):
+                idx = i % 3
+                if idx == 0: slot1.append(p)
+                elif idx == 1: slot2.append(p)
+                else: slot3.append(p)
+            strategy['pet_slots'] = [slot1, slot2, slot3]
+        elif len(pets) > 0:
+            strategy['pet_slots'] = [[p] for p in pets]
+        else:
+            strategy['pet_slots'] = []
+
+        # 2. Extract Script
+        script_text = ""
+        
+        # Search for code containers
+        script_box = pane.locator('.code:visible, .script-box:visible, textarea.form-control:visible').first
+        
+        if script_box.count() > 0:
+            tag = script_box.evaluate("el => el.tagName")
+            if tag == 'TEXTAREA':
+                script_text = script_box.input_value()
+            else:
+                script_text = script_box.inner_text()
+        
+        if not script_text:
+            # Fallback: scan text
+            try:
+                full_text = pane.inner_text()
+                if "use(" in full_text:
+                    lines = [l.strip() for l in full_text.split('\n') if "use(" in l or "change(" in l or "standby" in l]
+                    script_text = "\n".join(lines)
+            except: pass
+        
+        strategy['script'] = script_text
+        return strategy
+
+    def scrape_category(self, page, category_url):
+        print(f"\nScanning Category: {category_url}")
+        try:
+            page.goto(category_url, wait_until="domcontentloaded")
+            page.set_viewport_size({"width": 1920, "height": 1080})
+            self.auto_scroll(page) 
+        except: return []
+        
+        links = page.locator('a[href*="/Strategy/"], a[href*="/Encounter/"]').all()
+        
+        encounters = []
+        seen_urls = set()
+        
+        for link in links:
+            url = link.get_attribute('href')
+            if not url: continue
+            
+            full_url = f"{self.base_url}{url}" if not url.startswith('http') else url
+            if full_url in seen_urls: continue
+            
+            name = link.inner_text().strip()
+            if not name: continue
+            
+            # Filter out junk links
+            if len(name) < 3 or "Comment" in name: continue
+
+            seen_urls.add(full_url)
+            encounters.append({'name': name, 'url': full_url})
+            
+        return encounters
+
+    def run(self):
+        print("Starting Playwright Scraper (Desktop Mode)...")
+        
+        categories = {
+            "Pandaria": ["/Section/19/Pandaren_Spirit_Tamers", "/Section/20/Beasts_of_Fable", "/Section/21/Tamers"],
+            "Draenor": ["/Section/38/Draenor_Tamers"],
+            "Legion": ["/Section/48/Broken_Isles_Tamers"],
+            "Shadowlands": ["/Section/80/World_Quests"],
+            "The War Within": ["/Section/104/World_Quests"]
+        }
+
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True) 
             page = browser.new_page()
             
-            for expansion, categories in self.categories.items():
-                print(f"\n{'='*60}\n{expansion}\n{'='*60}")
-                all_data[expansion] = {}
+            for expansion, paths in categories.items():
+                self.data[expansion] = {}
                 
-                for category, url in categories.items():
-                    print(f"\n{category}:")
+                for path in paths:
+                    full_path = f"{self.base_url}{path}"
+                    encounters = self.scrape_category(page, full_path)
+                    print(f"Found {len(encounters)} encounters in {path}")
                     
-                    # Get encounter list
-                    page.goto(self.base_url + url, wait_until="domcontentloaded", timeout=45000)
-                    page.wait_for_timeout(1000)
-                    
-                    encounters = page.evaluate("""
-                        (() => {
-                            const encs = [];
-                            document.querySelectorAll('a[href*="/Encounter/"]').forEach(link => {
-                                const href = link.getAttribute('href');
-                                const name = link.innerText.trim();
-                                if (name && !encs.find(e => e.url === href)) {
-                                    encs.push({ name, url: href });
-                                }
-                            });
-                            return JSON.stringify(encs);
-                        })()
-                    """)
-                    
-                    encounters = json.loads(encounters)
-                    print(f"  Found {len(encounters)} encounters")
-                    
-                    all_data[expansion][category] = []
-                    
-                    for i, enc in enumerate(encounters, 1):
-                        try:
-                            # enc['url'] already has full path, don't prepend base_url
-                            enc_url = enc['url'] if enc['url'].startswith('http') else self.base_url + enc['url']
-                            page.goto(enc_url, wait_until="domcontentloaded", timeout=45000)
-                            page.wait_for_timeout(1000)
-                            
-                            teams = self.extract_teams(page)
-                            pet_slots = self.teams_to_slots(teams)
-                            
-                            all_data[expansion][category].append({
+                    cat_data = []
+                    for enc in encounters:
+                        strategies = self.scrape_encounter_page(page, enc['url'])
+                        if strategies:
+                            cat_data.append({
                                 'encounter_name': enc['name'],
-                                'url': enc_url,
-                                'strategies': [{
-                                    'pet_slots': pet_slots
-                                }],
-                                'team_count': len(teams)
+                                'url': enc['url'],
+                                'strategies': strategies
                             })
                             
-                            print(f"    [{i}/{len(encounters)}] {enc['name']}: {len(teams)} teams, {sum(len(s) for s in pet_slots)} total alternatives")
-                            total_enc += 1
-                            total_teams += len(teams)
-                            
-                            # Respectful delay
-                            time.sleep(1.5)
-                            
-                        except Exception as e:
-                            print(f"    [{i}/{len(encounters)}] {enc['name']}: ERROR - {e}")
-                    
-                    # Save progress after each category
-                    with open('strategies_browser_complete.json', 'w') as f:
-                        json.dump(all_data, f, indent=2)
-                    print(f"  ✓ Saved progress")
+                    self.data[expansion][path] = cat_data
             
             browser.close()
-        
-        print(f"\n{'='*60}")
-        print(f"COMPLETE! {total_enc} encounters, {total_teams} teams")
-        print(f"Saved to strategies_browser_complete.json")
+            
+        with open('strategies_full_browser.json', 'w') as f:
+            json.dump(self.data, f, indent=2)
+        print("\n✅ Scraping Complete. Saved to strategies_full_browser.json")
 
 if __name__ == "__main__":
-    print("="*60)
-    print("FULL-SCALE XU-FU BROWSER SCRAPER")
-    print("="*60)
-    print("\nThis will scrape ALL encounters from ALL expansions.")
-    print("Estimated time: 15-25 minutes")
-    print("Output: strategies_browser_complete.json\n")
-    
-    scraper = FullXuFuScraper()
-    scraper.scrape_all()
+    scraper = XuFuBrowserScraper()
+    scraper.run()

@@ -1,66 +1,105 @@
-import pytest
-from genetic.genome import TeamGenome
-from genetic.fitness import FitnessEvaluator
+import json
+import time
+import sys
+import random
 from genetic.evolution import EvolutionEngine
-from simulator import Team, Pet, PetStats, PetFamily, PetQuality, Ability
+from genetic.fitness import FitnessEvaluator
+from simulator import Team, Pet, Ability, PetFamily, PetQuality, PetStats
+from simulator.script_generator import TDScriptGenerator
 
-# Mock Data
-MOCK_SPECIES = [1, 2, 3, 4, 5]
-MOCK_ABILITY_DB = {
-    1: [1, 2, 3, 4, 5, 6],
-    2: [7, 8, 9, 10, 11, 12],
-    3: [13, 14, 15, 16, 17, 18],
-    4: [19, 20, 21, 22, 23, 24],
-    5: [25, 26, 27, 28, 29, 30]
-}
+# --- 1. Data Loading ---
+print("Loading Data...")
+try:
+    with open('abilities.json') as f:
+        ability_data = json.load(f)
+    species_abilities = {int(k): v for k, v in ability_data.get('species_abilities', {}).items()}
+    abilities_db = ability_data.get('abilities', {})
+except FileNotFoundError:
+    print("Error: abilities.json not found.")
+    exit(1)
 
-@pytest.fixture
-def target_team():
-    """Create a dummy target team"""
-    pets = [
-        Pet(
-            species_id=100, name="Target Dummy", family=PetFamily.BEAST, quality=PetQuality.RARE,
-            stats=PetStats(max_hp=1000, current_hp=1000, power=200, speed=200),
-            abilities=[Ability(id=99, name="Nothing", power=0, accuracy=100, speed=0, cooldown=0, family=PetFamily.BEAST)]
-        )
-    ]
-    return Team(pets=pets)
+try:
+    with open('species_data.json') as f:
+        species_db = json.load(f)
+except FileNotFoundError:
+    species_db = {}
 
-def test_genome_generation():
-    genome = TeamGenome.random(MOCK_SPECIES, MOCK_ABILITY_DB)
-    assert len(genome.pets) == 3
-    assert genome.pets[0].species_id in MOCK_SPECIES
-    assert len(genome.pets[0].abilities) == 3
+# --- 2. Boss Team ---
+def create_boss_team():
+    grizzle = Pet(979, "Grizzle (Boss)", PetFamily.BEAST, PetQuality.EPIC, PetStats(1700, 1700, 320, 270), [
+        Ability(1, "Bash", 25, 100, 0, 0, PetFamily.BEAST),
+        Ability(2, "Hibernate", 0, 100, 0, 4, PetFamily.BEAST),
+        Ability(3, "Rampage", 35, 95, 0, 0, PetFamily.BEAST)])
+    beakmaster = Pet(978, "Beakmaster (Boss)", PetFamily.MECHANICAL, PetQuality.EPIC, PetStats(1500, 1500, 290, 300), [
+        Ability(4, "Batter", 10, 100, 0, 0, PetFamily.MECHANICAL),
+        Ability(5, "Shock and Awe", 25, 100, 0, 3, PetFamily.MECHANICAL),
+        Ability(6, "Wind-Up", 50, 90, 0, 2, PetFamily.MECHANICAL)])
+    bloom = Pet(977, "Bloom (Boss)", PetFamily.ELEMENTAL, PetQuality.EPIC, PetStats(1400, 1400, 340, 250), [
+        Ability(7, "Lash", 20, 100, 0, 0, PetFamily.ELEMENTAL),
+        Ability(8, "Soothing Mists", 0, 100, 0, 3, PetFamily.ELEMENTAL),
+        Ability(9, "Entangling Roots", 15, 100, 0, 4, PetFamily.ELEMENTAL)])
+    return Team([grizzle, beakmaster, bloom])
 
-def test_crossover():
-    parent1 = TeamGenome.random(MOCK_SPECIES, MOCK_ABILITY_DB)
-    parent2 = TeamGenome.random(MOCK_SPECIES, MOCK_ABILITY_DB)
-    
-    child = parent1.crossover(parent2)
-    assert len(child.pets) == 3
-    # Child pets should come from parents
-    assert child.pets[0].species_id == parent1.pets[0].species_id or \
-           child.pets[0].species_id == parent2.pets[0].species_id
+target_team = create_boss_team()
+print(f"Target: Major Payne (3 Epic Pets)")
 
-def test_mutation():
-    genome = TeamGenome.random(MOCK_SPECIES, MOCK_ABILITY_DB)
-    original_species = [p.species_id for p in genome.pets]
-    
-    # Force mutation
-    genome.mutate(MOCK_SPECIES, MOCK_ABILITY_DB, mutation_rate=1.0)
-    
-    # At least one thing should likely change with 100% rate
-    # (Though random choice could pick same species, so this is probabilistic)
-    pass 
+# --- 3. Evolution Setup ---
+evaluator = FitnessEvaluator(target_team, abilities_db, species_db, target_name="Major Payne")
+engine = EvolutionEngine(evaluator, population_size=100, mutation_rate=0.5, elitism_rate=0.1)
+available_species = list(species_abilities.keys())
 
-def test_evolution_loop(target_team):
-    evaluator = FitnessEvaluator(target_team, MOCK_ABILITY_DB, {})
-    engine = EvolutionEngine(evaluator, population_size=10)
-    
-    engine.initialize_population(MOCK_SPECIES, MOCK_ABILITY_DB)
-    assert len(engine.population) == 10
-    
-    stats = engine.evolve_generation(MOCK_SPECIES)
-    assert stats['generation'] == 1
-    assert stats['best_fitness'] >= 0
-    assert engine.best_genome is not None
+print("Initializing Population (Smart Draft)...")
+engine.initialize_population(available_species, species_abilities, npc_name="Major Payne")
+
+print("\nStarting UNLIMITED Evolution (Press Ctrl+C to stop)...")
+start_time = time.time()
+gen = 0
+
+try:
+    while True:
+        gen += 1
+        result = engine.evolve_generation(available_species)
+        best = result['best_fitness']
+        status = result.get('win_status', '???')
+        
+        if gen == 1 or gen % 10 == 0 or best > 14000:
+            top = result['top_genomes'][0]
+            names = [species_db.get(str(p.species_id), {}).get('name', str(p.species_id)) for p in top.pets]
+            print(f"\nGen {gen}: {best:.0f} ({status}) | Team: {names}")
+        else:
+            print(f"{best:.0f}", end=" | ", flush=True)
+
+        # Score > 15,000 means Consistent Wins (due to num_battles=3)
+        if best > 15000: 
+            print(f"\n\nVICTORY DETECTED at Generation {gen}!")
+            break
+
+except KeyboardInterrupt:
+    print("\n\nSimulation stopped by user.")
+
+# --- 5. REPLAY & VERIFY ---
+print("\n--- VERIFYING VICTORY (Hunting for Winning Seed) ---")
+final_result = {}
+attempts = 0
+success = False
+
+# Try 20 times to find the seed where it wins
+while attempts < 20:
+    attempts += 1
+    final_result = evaluator.play_battle(engine.best_genome)
+    if final_result['winner'] == 'player':
+        print(f"Verified WIN on attempt {attempts}!")
+        success = True
+        break
+    else:
+        print(f"Attempt {attempts} failed (Bad RNG). Retrying...")
+
+if success:
+    print(f"\nResult: {final_result['winner'].upper()} (Turns: {final_result['turns']})")
+    print("\n--- TD SCRIPT ---")
+    script = TDScriptGenerator.generate_script(final_result['events'])
+    print(script)
+else:
+    print("\n[WARNING] Could not reproduce victory. Strategy might be unstable.")
+
+print("---------------------------")

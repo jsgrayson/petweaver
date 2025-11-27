@@ -1,8 +1,15 @@
 import random
 import copy
-from typing import List, Dict, Callable
+from typing import List, Dict, Callable, Optional
 from .genome import TeamGenome, PetGene, StrategyGene
 from .fitness import FitnessEvaluator
+
+try:
+    from simulator import PetFamily
+except ImportError:
+    class PetFamily:
+        HUMANOID=0; DRAGONKIN=1; FLYING=2; UNDEAD=3; CRITTER=4
+        MAGIC=5; ELEMENTAL=6; BEAST=7; AQUATIC=8; MECHANICAL=9
 
 class EvolutionEngine:
     def __init__(
@@ -19,187 +26,214 @@ class EvolutionEngine:
         self.population: List[TeamGenome] = []
         self.generation = 0
         self.best_genome: TeamGenome = None
+        self.stagnation_counter = 0
+        self.last_best_fitness = 0.0
+        self.locked_slots = [False, False, False]
+        self.slot_pools = [[], [], []]
 
-    def initialize_population(
-        self, 
-        available_species: List[int], 
-        ability_db: Dict, 
-        npc_name: str = None, 
-        strategy_manager = None,
-        capture_mode: bool = False
-    ):
-        """Create initial random population, optionally seeded with known strategies"""
-        self.ability_db = ability_db  # Store for mutation
-        self.population = []
+    def get_type_effectiveness(self, attack_family, defend_family):
+        strong_against = {
+            0: {1, 3}, 1: {5, 2}, 2: {8, 4}, 3: {0, 4}, 4: {3},
+            5: {2, 9}, 6: {9, 4}, 7: {4, 9}, 8: {6, 3}, 9: {7, 6}
+        }
+        if hasattr(attack_family, 'value'): attack_family = attack_family.value
+        if hasattr(defend_family, 'value'): defend_family = defend_family.value
+        if defend_family in strong_against.get(attack_family, {}): return 1.5
+        return 1.0
+
+    def build_slot_pools(self, available_species, ability_db):
+        enemy_team = getattr(self.evaluator, 'target_team', None)
+        species_db = getattr(self.evaluator, 'species_db', {})
+        ability_info_db = getattr(self.evaluator, 'ability_db', {})
         
-        # 1. Seed with Capture Teams (if in capture mode)
-        if capture_mode:
-            # Team 1: Mechanical Pandaren Dragonling (64899) + Terrible Turnip (86713)
-            team1_ids = [64899, 86713, 0]
-            if all(pid in available_species for pid in team1_ids if pid != 0):
-                team1_genome = TeamGenome.from_team_ids(team1_ids, ability_db)
-                for _ in range(2): self.population.append(copy.deepcopy(team1_genome))
-                
-            # Team 2: Darkmoon Zeppelin (68659) + Stunted Direhorn (68663)
-            team2_ids = [68659, 68663, 0]
-            if all(pid in available_species for pid in team2_ids if pid != 0):
-                team2_genome = TeamGenome.from_team_ids(team2_ids, ability_db)
-                for _ in range(2): self.population.append(copy.deepcopy(team2_genome))
-                
-            # Team 3: Fallback (Turnip + Corgi + Snobold)
-            team3_ids = [1180, 1563, 1204]
-            if all(pid in available_species for pid in team3_ids):
-                team3_genome = TeamGenome.from_team_ids(team3_ids, ability_db)
-                for _ in range(2): self.population.append(copy.deepcopy(team3_genome))
+        if not enemy_team: return
+        self.slot_pools = [[], [], []]
+        print("    [AI] Building optimized counter pools...")
         
-        # 2. Seed with Encounter-Specific Strategy
-        if npc_name and strategy_manager and not capture_mode:
-            recommended_ids = strategy_manager.get_recommended_team(npc_name)
-            if recommended_ids and any(pid != 0 for pid in recommended_ids):
-                # Create seeded genome
-                seeded_genome = TeamGenome.from_team_ids(recommended_ids, ability_db)
-                # Add multiple copies to give it a head start
-                for _ in range(3):
-                    self.population.append(copy.deepcopy(seeded_genome))
+        for i, enemy_pet in enumerate(enemy_team.pets):
+            counters = []
+            candidates = available_species if len(available_species) < 2000 else random.sample(available_species, 2000)
+            for sid in candidates:
+                score = 0
+                my_ability_ids = ability_db.get(sid, [])
+                if not my_ability_ids: continue
+
+                # 1. Strong Attack
+                for aid in my_ability_ids:
+                    ainfo = ability_info_db.get(str(aid)) or ability_info_db.get(aid)
+                    if ainfo and isinstance(ainfo, dict):
+                        atk_type = ainfo.get('family_id', 7)
+                        if self.get_type_effectiveness(atk_type, enemy_pet.family) > 1.0:
+                            score += 10; break
+                
+                # 2. Resist
+                s_data = species_db.get(str(sid)) or species_db.get(sid)
+                if s_data:
+                    if isinstance(s_data, list):
+                        print(f"DEBUG CRASH: s_id={sid}, type={type(s_data)}, content={s_data}")
                     
-        # 3. Seed with Universal Meta Teams (Haunt/Black Claw/Flock)
-        # Unborn Val'kyr (71163), Ikky (115589), Zandalari Anklerender (69651)
-        if not capture_mode:
-            meta_team_ids = [71163, 115589, 69651]
+                    my_fam = s_data.get('family_id', 7)
+                    if self.get_type_effectiveness(enemy_pet.family, my_fam) < 1.0: score += 5
+
+                if score >= 10: counters.append(sid)
             
-            # Verify we have these pets in available_species (or just force them if we want to cheat/test)
-            # For now, only add if they are in available_species to respect collection
-            if all(pid in available_species for pid in meta_team_ids):
-                meta_genome = TeamGenome.from_team_ids(meta_team_ids, ability_db)
-                for _ in range(2):
-                    self.population.append(copy.deepcopy(meta_genome))
+            if not counters: counters = available_species 
+            self.slot_pools[i] = counters
+            print(f"    [AI] Slot {i+1} Pool: {len(counters)} counters.")
+
+    def initialize_population(self, available_species, ability_db, npc_name=None, strategy_manager=None, capture_mode=False, seed_teams=None, strategy_file=None):
+        self.ability_db = ability_db
+        self.population = []
+        self.build_slot_pools(available_species, ability_db)
+        self.locked_slots = [False, False, False]
+        
+        # 1. Load strategies from file if provided
+        loaded_seeds = []
+        if strategy_file:
+            try:
+                import json
+                with open(strategy_file) as f:
+                    strategies_data = json.load(f)
                 
-        # 4. Fill rest with Random (Biased for Capture Mode)
-        safe_species = []
-        if capture_mode:
-            safe_species = self._get_safe_species(available_species, ability_db)
-            
+                # Find strategies for this specific NPC
+                for enc_id, enc_data in strategies_data.items():
+                    if npc_name and npc_name.lower() in enc_data.get('name', '').lower():
+                        print(f"    [AI] Found {len(enc_data.get('strategies', []))} strategies for {npc_name}")
+                        for strategy in enc_data.get('strategies', []):
+                            team_ids = [p['species_id'] for p in strategy['pets'] if p['species_id'] > 0]
+                            if len(team_ids) == 3:
+                                loaded_seeds.append(team_ids)
+                        break
+            except Exception as e:
+                print(f"    [!] Could not load strategy file: {e}")
+        
+        # Combine manual seeds with loaded seeds
+        all_seeds = (seed_teams or []) + loaded_seeds
+        
+        # 2. Inject Seeds (if available)
+        if all_seeds:
+            print(f"    [AI] Seeding population with {len(all_seeds)} known strategies...")
+            for seed in all_seeds:
+                # seed is expected to be a list of species_ids [id1, id2, id3]
+                try:
+                    genome = TeamGenome.from_team_ids(seed, ability_db)
+                    # Evaluate immediately to see if they are good
+                    genome.fitness = self.evaluator.evaluate(genome)
+                    self.population.append(genome)
+                except Exception as e:
+                    print(f"    [!] Failed to inject seed {seed}: {e}")
+
+        # 3. Fill remaining with Smart Draft
         while len(self.population) < self.pop_size:
-            if capture_mode and safe_species and random.random() < 0.7:
-                # 70% chance to include at least one safe pet
-                genome = TeamGenome.random(available_species, ability_db)
-                
-                # Replace first pet with a safe pet
-                safe_pet_id = random.choice(safe_species)
-                possible_abilities = ability_db.get(safe_pet_id, [1, 2, 3, 4, 5, 6])
-                selected_abilities = TeamGenome._select_valid_abilities(possible_abilities)
-                
-                genome.pets[0] = PetGene(
-                    species_id=safe_pet_id,
-                    abilities=selected_abilities,
-                    strategy=StrategyGene()
-                )
-                self.population.append(genome)
-            else:
-                self.population.append(TeamGenome.random(available_species, ability_db))
+            p1 = random.choice(self.slot_pools[0])
+            p2 = random.choice(available_species)
+            p3 = random.choice(available_species)
+            genome = TeamGenome.from_team_ids([p1, p2, p3], ability_db)
+            self.population.append(genome)
             
         self.generation = 0
 
-    def _get_safe_species(self, available_species: List[int], ability_db: Dict) -> List[int]:
-        """Identify species with 'Safe' abilities (Weakening Blow, Superbark)"""
-        SAFE_ABILITY_IDS = {408, 1354} # Weakening Blow, Superbark
-        safe_species = []
-        
-        for species_id in available_species:
-            abilities = ability_db.get(species_id, [])
-            # Check if any ability is in SAFE_ABILITY_IDS
-            # Note: ability_db values are lists of IDs
-            if any(aid in SAFE_ABILITY_IDS for aid in abilities):
-                safe_species.append(species_id)
-                
-        return safe_species
-
     def evolve_generation(self, available_species: List[int]):
-        """Run one generation of evolution"""
-        # 1. Evaluate Fitness
+        # 1. Evaluate
         for genome in self.population:
-            if genome.fitness == 0: # Only evaluate if not already cached
+            if genome.fitness == 0:
                 genome.fitness = self.evaluator.evaluate(genome)
         
-        # Sort by fitness (descending)
         self.population.sort(key=lambda g: g.fitness, reverse=True)
+        current_best = self.population[0].fitness
         
-        # Track best
-        if not self.best_genome or self.population[0].fitness > self.best_genome.fitness:
-            self.best_genome = self.population[0]
-            
-        # NEW: Identify best individual pet across ALL teams
-        pet_fitness_map = {}  # species_id -> total fitness contribution
-        for genome in self.population[:10]:  # Check top 10 teams
-            for pet in genome.pets:
-                if pet.species_id not in pet_fitness_map:
-                    pet_fitness_map[pet.species_id] = []
-                pet_fitness_map[pet.species_id].append(genome.fitness)
+        if not self.best_genome or current_best > self.best_genome.fitness:
+            self.best_genome = copy.deepcopy(self.population[0])
+            self.stagnation_counter = 0
+        else:
+            self.stagnation_counter += 1
+
+        # 2. Update Locks
+        status = getattr(self.best_genome, 'win_status', "LLL")
+        while len(status) < 3: status += "L"
         
-        # Average fitness for each species
-        avg_fitness_by_species = {sid: sum(fits)/len(fits) for sid, fits in pet_fitness_map.items()}
-        best_pet_species = max(avg_fitness_by_species, key=avg_fitness_by_species.get) if avg_fitness_by_species else None
-            
-        # 2. Selection (Elitism)
-        new_pop = self.population[:self.elitism_count]
+        if status[0] == "W": self.locked_slots[0] = True
+        if status[1] == "W" and self.locked_slots[0]: self.locked_slots[1] = True
+        if status[2] == "W" and self.locked_slots[1]: self.locked_slots[2] = True
         
-        # 3. Reproduction
+        # Identify Active Slot
+        active_slot = 3 # Default to "Optimization Mode" (All Locked)
+        for i, locked in enumerate(self.locked_slots):
+            if not locked:
+                active_slot = i
+                break
+
+        # 3. Reproduction (Alien Injection)
+        new_pop = []
+        new_pop.append(copy.deepcopy(self.best_genome)) # Elitism (Keep #1)
+        
+        # Dynamic Alien Rate: Base 10%, +5% per stagnant generation (Max 80%)
+        alien_rate = 0.10 + (self.stagnation_counter * 0.05)
+        if alien_rate > 0.8: alien_rate = 0.8
+        
+        pool = self.slot_pools[active_slot] if active_slot < 3 else available_species
+        
         while len(new_pop) < self.pop_size:
-            # Tournament Selection
-            parent1 = self._tournament_select()
-            parent2 = self._tournament_select()
+            # ALIEN INJECTION: Introduce fresh blood to break local optima
+            if random.random() < alien_rate:
+                # Create a completely new random team using SMART POOLS
+                # Use the specific counter pools for each slot to ensure higher quality
+                p1 = random.choice(self.slot_pools[0])
+                p2 = random.choice(self.slot_pools[1]) if self.slot_pools[1] else random.choice(available_species)
+                p3 = random.choice(self.slot_pools[2]) if self.slot_pools[2] else random.choice(available_species)
+                
+                alien = TeamGenome.from_team_ids([p1, p2, p3], self.ability_db)
+                alien.fitness = 0
+                new_pop.append(alien)
+                continue
+
+            # Clone Best Genome (Stability)
+            child = copy.deepcopy(self.best_genome)
             
-            # Crossover
-            child = parent1.crossover(parent2)
+            # MUTATE ONLY ACTIVE SLOT
+            target_slot = active_slot
             
-            # NEW: Inject best pet into child (replace worst pet)
-            if best_pet_species and random.random() < 0.4:  # 40% chance
-                # Find if best pet already in team
-                has_best_pet = any(p.species_id == best_pet_species for p in child.pets)
-                if not has_best_pet and len(child.pets) == 3:
-                    # Replace a random pet with the best pet
-                    replace_idx = random.randint(0, 2)
-                    
-                    # Get valid abilities for this species
-                    possible_abilities = self.ability_db.get(best_pet_species, [1, 2, 3, 4, 5, 6])
-                    valid_abilities = TeamGenome._select_valid_abilities(possible_abilities)
-                    
-                    child.pets[replace_idx] = PetGene(
-                        species_id=best_pet_species,
-                        abilities=valid_abilities,
-                        strategy=StrategyGene()
-                    )
-                    child.fitness = 0  # Force re-evaluation
+            # OPTIMIZATION MODE: If all slots locked (WWW), pick random slot to optimize
+            if active_slot == 3:
+                target_slot = random.randint(0, 2)
+                pool = self.slot_pools[target_slot]
+
+            if target_slot < 3:
+                # Force mutation on the target problem
+                new_id = random.choice(pool)
+                
+                possible_abs = self.ability_db.get(new_id, [])
+                selected_abs = []
+                if possible_abs:
+                    if isinstance(possible_abs, list):
+                        selected_abs = possible_abs[:3] if len(possible_abs)>=3 else possible_abs
+                
+                child.pets[target_slot] = PetGene(
+                    species_id=new_id, 
+                    abilities=selected_abs, 
+                    strategy=StrategyGene()
+                )
             
-            # Mutation
-            # We need ability_db here, but it wasn't stored in __init__
-            # We'll assume it was passed to initialize_population and stored
-            if hasattr(self, 'ability_db'):
-                child.mutate(available_species, self.ability_db, self.mutation_rate)
-            else:
-                # Fallback if DB missing (shouldn't happen if initialized correctly)
-                # We'll just pass an empty dict which will trigger defaults in mutate
-                child.mutate(available_species, {}, self.mutation_rate)
-            
+            child.fitness = 0
             new_pop.append(child)
             
-        # Capture stats of the EVALUATED population (before replacement)
-        best_genome = self.population[0]
+        # FITNESS DECAY: If stuck for 20+ gens, decay the best genome's fitness
+        # This forces it to eventually be dethroned by a fresh candidate ("Cycling")
+        if self.stagnation_counter > 20:
+            self.best_genome.fitness *= 0.95
+            
         avg_fitness = sum(g.fitness for g in self.population) / self.pop_size
-        top_genomes = self.population[:3] # Top 3 for UI
-        
         self.population = new_pop
         self.generation += 1
         
         return {
             "generation": self.generation,
-            "best_fitness": best_genome.fitness,
+            "best_fitness": self.best_genome.fitness,
+            "win_status": status,
             "avg_fitness": avg_fitness,
-            "best_pet": best_pet_species,
-            "top_genomes": top_genomes
+            "top_genomes": self.population[:3]
         }
 
-    def _tournament_select(self, k: int = 3) -> TeamGenome:
-        """Select best parent from k random individuals"""
+    def _tournament_select(self, k=3):
         contestants = random.sample(self.population, k)
         return max(contestants, key=lambda g: g.fitness)

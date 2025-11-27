@@ -1,170 +1,196 @@
-"""
-Fast Playwright-based scraper for Xu-Fu strategies.
-Uses browser automation with JavaScript extraction for speed.
-"""
-
 import json
+import re
 import time
-from playwright.sync_api import sync_playwright
 from datetime import datetime
+from playwright.sync_api import sync_playwright
 
-class FastXuFuScraper:
+class XuFuBrowserScraper:
     def __init__(self):
         self.base_url = "https://www.wow-petguide.com"
         self.data = {}
         
-    def extract_teams_and_script(self, page, encounter_url):
-        """Extract all teams and script from an encounter page"""
-        print(f"  Loading {encounter_url}")
-        page.goto(encounter_url, wait_until="domcontentloaded", timeout=45000)
-        page.wait_for_timeout(1000)  # Let JavaScript finish
-        
-        # Click "Browse all alternatives"
-        teams = []
-        try:
-            page.click('text="Browse all alternatives"', timeout=8000)
+    def auto_scroll(self, page):
+        """Aggressive scrolling to ensure all lazy content loads."""
+        # Scroll down in large chunks
+        for i in range(10):
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             page.wait_for_timeout(500)
             
-            # Scroll modal to bottom
-            page.evaluate("""
-                const modal = document.getElementById('alternatives_window');
-                if (modal) modal.scrollTop = modal.scrollHeight;
-            """)
-            page.wait_for_timeout(300)
-            
-            # Extract all teams
-            teams_json = page.evaluate("""
-                (() => {
-                    const table = document.getElementById('alternatives_window');
-                    if (!table) return '[]';
-                    const rows = table.querySelectorAll('tr');
-                    const teams = [];
-                    rows.forEach(row => {
-                        const petDivs = row.querySelectorAll('td:first-child > div');
-                        const team = [];
-                        petDivs.forEach(div => {
-                            const link = div.querySelector('a');
-                            const img = div.querySelector('img');
-                            if (link) {
-                                const href = link.getAttribute('href');
-                                let name = '[Unknown]';
-                                let id = 0;
-                                const match = href.match(/\\/Pet\\/(\\d+)\\/(.*)/);
-                                if (match) {
-                                    id = parseInt(match[1]);
-                                    name = match[2].replace(/_/g, ' ');
-                                }
-                                team.push({ name, id });
-                            } else if (img && img.getAttribute('alt') === 'Leveling Pet') {
-                                team.push({ name: '[Empty/Leveling]', id: 0 });
-                            } else {
-                                team.push({ name: '[Unknown]', id: 0 });
-                            }
-                        });
-                        if (team.length === 3) teams.push(team);
-                    });
-                    return JSON.stringify(teams);
-                })()
-            """)
-            
-            teams = json.loads(teams_json)
-            
-            # Try to close modal (optional - doesn't matter if it fails)
+            # Check if a "Load More" button exists and click it
             try:
-                page.keyboard.press('Escape')
-                page.wait_for_timeout(200)
-            except:
-                pass
-            
-        except Exception as e:
-            print(f"  Warning: Alternatives extraction failed: {e}")
-        
-        # Extract script
-        script = ""
+                load_more = page.locator("button:has-text('Load more')")
+                if load_more.is_visible():
+                    load_more.click()
+                    page.wait_for_timeout(1000)
+            except: pass
+
+    def extract_script_from_modal(self, page):
+        """Extracts script from tooltip or clipboard button."""
+        script_text = ""
         try:
-            page.click('text="Script"', timeout=5000)
-            page.wait_for_timeout(300)
-            script = page.evaluate("""
-                document.getElementById('td_tooltip') ? 
-                document.getElementById('td_tooltip').innerText : 
-                ''
-            """)
-        except Exception as e:
-            print(f"  Warning: Script extraction failed: {e}")
-        
-        return teams, script
-    
-    def scrape_encounters(self, encounters):
-        """Scrape a list of encounters"""
-        results = []
-        
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
+            # 1. Try Tooltip
+            tooltip = page.locator("#td_tooltip")
+            if tooltip.is_visible():
+                text = tooltip.inner_text()
+                lines = [l.strip() for l in text.split('\n') if l.strip() and not l.startswith("Click the button")]
+                script_text = "\n".join(lines)
             
-            for i, enc in enumerate(encounters, 1):
-                print(f"[{i}/{len(encounters)}] {enc['name']}")
-                try:
-                    teams, script = self.extract_teams_and_script(page, enc['url'])
-                    
-                    results.append({
-                        'encounter_name': enc['name'],
-                        'url': enc['url'],
-                        'teams': teams,
-                        'script': script,
-                        'team_count': len(teams),
-                        'scraped_at': datetime.now().isoformat()
-                    })
-                    
-                    print(f"  ✓ Extracted {len(teams)} teams")
-                    
-                except Exception as e:
-                    print(f"  ✗ Error: {e}")
-                    results.append({
-                        'encounter_name': enc['name'],
-                        'url': enc['url'],
-                        'error': str(e)
-                    })
+            # 2. Try "Copy Script" button if tooltip failed
+            if not script_text:
+                copy_btn = page.locator(".fa-copy").first
+                if copy_btn.is_visible():
+                    # We can't easily read clipboard in headless, so we rely on tooltip/display
+                    pass
+        except: pass
+        return script_text
+
+    def scrape_alternatives(self, page):
+        """Fast scrape of alternatives."""
+        variations = []
+        try:
+            browse_btn = page.locator("a:has-text('Browse all alternatives')")
+            if not browse_btn.is_visible(): return []
+            
+            browse_btn.click()
+            page.wait_for_selector("#alternatives_window", timeout=3000)
+            
+            # Get all rows
+            rows = page.locator("#alternatives_window tr").all()
+            
+            # Limit to first 5 variations for SPEED
+            for i in range(1, min(len(rows), 6)):
+                row = rows[i]
                 
-                # Small delay between encounters to be respectful
-                time.sleep(1.5)
+                # Extract IDs quickly
+                html = row.inner_html()
+                team_ids = [int(x) for x in re.findall(r'/Pet/(\d+)/', html)]
+                while len(team_ids) < 3: team_ids.append(0)
+                team_ids = team_ids[:3]
+
+                # Click row to trigger script display
+                try:
+                    row.locator("td").first.click(timeout=300)
+                    page.wait_for_timeout(200) # Short wait
+                    
+                    script = self.extract_script_from_modal(page)
+                    if script:
+                        variations.append({"team": team_ids, "script": script})
+                except: continue
+
+            page.keyboard.press("Escape")
+        except: 
+            try: page.keyboard.press("Escape") 
+            except: pass
+            
+        return variations
+
+    def scrape_encounter_page(self, page, url):
+        # Optimization: Don't print every URL to reduce I/O lag
+        try:
+            page.goto(url, wait_until="domcontentloaded")
+            
+            # Quick check for main script
+            main_script = ""
+            try:
+                main_script = page.locator('.code, .script-box, textarea.form-control').first.inner_text()
+            except: pass
+
+            strategies = []
+            if main_script:
+                strategies.append({
+                    "name": "Default",
+                    "pet_slots": [], # We can skip detailed pet parsing for speed if needed
+                    "script": main_script
+                })
+
+            # Quick check for alternatives
+            alts = self.scrape_alternatives(page)
+            for alt in alts:
+                strategies.append({
+                    "name": "Variation",
+                    "pet_slots": [[{'id': pid, 'name': 'Unknown'}] for pid in alt['team']],
+                    "script": alt['script'],
+                    "is_variation": True
+                })
+                
+            return strategies
+
+        except: return []
+
+    def scrape_category(self, context, category_url):
+        print(f"Scanning: {category_url}")
+        page = context.new_page()
+        try:
+            page.goto(category_url, wait_until="domcontentloaded")
+            self.auto_scroll(page)
+            
+            # Extract all links at once
+            links = page.evaluate("""() => {
+                return Array.from(document.querySelectorAll('a[href*="/Strategy/"], a[href*="/Encounter/"]'))
+                    .map(a => ({text: a.innerText, href: a.href}))
+                    .filter(a => a.text.length > 3 && !a.text.includes('Comment'));
+            }""")
+            
+            seen = set()
+            encounters = []
+            for link in links:
+                if link['href'] not in seen:
+                    seen.add(link['href'])
+                    encounters.append({'name': link['text'], 'url': link['href']})
+            
+            page.close()
+            return encounters
+        except: 
+            page.close()
+            return []
+
+    def run(self):
+        print("Starting Optimized Parallel Scraper...")
+        
+        categories = {
+            "Pandaria": ["/Section/19/Pandaren_Spirit_Tamers", "/Section/20/Beasts_of_Fable"],
+            "Draenor": ["/Section/38/Draenor_Tamers"],
+            "The War Within": ["/Section/104/World_Quests"]
+        }
+
+        with sync_playwright() as p:
+            # Launch browser
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            
+            for expansion, paths in categories.items():
+                self.data[expansion] = {}
+                
+                for path in paths:
+                    full_path = f"{self.base_url}{path}"
+                    encounters = self.scrape_category(context, full_path)
+                    print(f"  Found {len(encounters)} encounters. Scraping details...")
+                    
+                    # Process encounters in chunks to manage memory/tabs
+                    cat_data = []
+                    for i, enc in enumerate(encounters):
+                        # Re-use a single page for details to avoid opening/closing overhead
+                        page = context.new_page()
+                        strategies = self.scrape_encounter_page(page, enc['url'])
+                        page.close()
+                        
+                        if strategies:
+                            cat_data.append({
+                                'encounter_name': enc['name'],
+                                'url': enc['url'],
+                                'strategies': strategies
+                            })
+                        
+                        if i % 5 == 0: print(f"    Processed {i}/{len(encounters)}")
+                            
+                    self.data[expansion][path] = cat_data
             
             browser.close()
-        
-        return results
-
-# The War Within encounters
-TWW_ENCOUNTERS = [
-    {"name": "Rock Collector", "url": "https://www.wow-petguide.com/Encounter/1589/Rock_Collector"},
-    {"name": "Robot Rumble", "url": "https://www.wow-petguide.com/Encounter/1590/Robot_Rumble"},
-    {"name": "The Power of Friendship", "url": "https://www.wow-petguide.com/Encounter/1592/The_Power_of_Friendship"},
-    {"name": "Major Malfunction", "url": "https://www.wow-petguide.com/Encounter/1593/Major_Malfunction"},
-    {"name": "Miniature Army", "url": "https://www.wow-petguide.com/Encounter/1595/Miniature_Army"},
-    {"name": "The Thing from the Swamp", "url": "https://www.wow-petguide.com/Encounter/1596/The_Thing_from_the_Swamp"},
-    {"name": "Ziriak", "url": "https://www.wow-petguide.com/Encounter/1598/Ziriak"},
-    {"name": "One Hungry Worm", "url": "https://www.wow-petguide.com/Encounter/1599/One_Hungry_Worm"}
-]
+            
+        with open('strategies_fast.json', 'w') as f:
+            json.dump(self.data, f, indent=2)
+        print("\n✅ Done! Saved to strategies_fast.json")
 
 if __name__ == "__main__":
-    print("Fast Playwright Scraper - The War Within Test")
-    print(f"Scraping {len(TWW_ENCOUNTERS)} encounters...\n")
-    
-    scraper = FastXuFuScraper()
-    results = scraper.scrape_encounters(TWW_ENCOUNTERS)
-    
-    # Save results
-    output = {
-        "expansion": "The War Within",
-        "category": "World Quests",
-        "encounters": results,
-        "total_encounters": len(results),
-        "total_teams": sum(r.get('team_count', 0) for r in results),
-        "scraped_at": datetime.now().isoformat()
-    }
-    
-    with open('tww_test_fast.json', 'w') as f:
-        json.dump(output, f, indent=2)
-    
-    print(f"\n✓ Saved to tww_test_fast.json")
-    print(f"  Total encounters: {len(results)}")
-    print(f"  Total teams extracted: {output['total_teams']}")
+    scraper = XuFuBrowserScraper()
+    scraper.run()

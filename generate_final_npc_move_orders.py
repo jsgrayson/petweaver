@@ -24,9 +24,18 @@ def normalize_name(name):
 def get_npc_data(encounters, abilities_db):
     npc_lookup = {}
     
-    # Handle dict structure (encounters.json is a dict with encounter keys)
-    for enc_key, enc_data in encounters.items():
-        name = enc_data.get('name') or enc_key
+    # Handle both list and dict formats
+    enc_list = []
+    if isinstance(encounters, list):
+        enc_list = encounters
+    elif isinstance(encounters, dict):
+        # Dict format: convert to list
+        for enc_key, enc_data in encounters.items():
+            enc_list.append(enc_data)
+    
+    # Process encounters
+    for enc_data in enc_list:
+        name = enc_data.get('name', 'Unknown')
         
         norm_name = normalize_name(name)
         pets = {}

@@ -18,9 +18,19 @@ class StrategyGene:
 class PetGene:
     """Represents a single pet in the team"""
     species_id: int
-    breed_id: int = 3  # Default to B/B for now
+    breed_id: int = 3  # Default to B/B (Balanced)
     abilities: List[int] = field(default_factory=list) # [id1, id2, id3]
     strategy: StrategyGene = field(default_factory=StrategyGene)
+    
+    @staticmethod
+    def get_available_breeds(species_id: int, species_db: Dict = None) -> List[int]:
+        """Get available breeds for this species. Returns common breeds if not in DB."""
+        if species_db and str(species_id) in species_db:
+            species_data = species_db[str(species_id)]
+            if 'available_breeds' in species_data:
+                return species_data['available_breeds']
+        # Default to common breeds (B/B, P/P, S/S, H/H)
+        return [3, 4, 5, 6]
 
 @dataclass
 class TeamGenome:
@@ -102,6 +112,8 @@ class TeamGenome:
             
             # Get valid abilities
             possible_abilities = ability_db.get(species_id, [1, 2, 3, 4, 5, 6])
+            if isinstance(possible_abilities, dict):
+                possible_abilities = possible_abilities.get('abilities', [])
             selected_abilities = cls._select_valid_abilities(possible_abilities)
             
             # Default strategy
@@ -115,7 +127,7 @@ class TeamGenome:
             
         return genome
 
-    def mutate(self, available_species: List[int], ability_db: Dict, mutation_rate: float = 0.1):
+    def mutate(self, available_species: List[int], ability_db: Dict, mutation_rate: float = 0.1, species_db: Dict = None):
         """Randomly modify the genome"""
         mutated = False
         for i in range(len(self.pets)):
@@ -129,9 +141,23 @@ class TeamGenome:
                 # Pick valid abilities safely
                 new_abilities = self._select_valid_abilities(possible_abilities)
                 
+                # Pick a valid breed for new species
+                available_breeds = PetGene.get_available_breeds(new_species, species_db)
+                new_breed = random.choice(available_breeds)
+                
                 # Reset abilities/strategy for new pet
-                self.pets[i] = PetGene(species_id=new_species, abilities=new_abilities)
+                self.pets[i] = PetGene(species_id=new_species, breed_id=new_breed, abilities=new_abilities)
                 mutated = True
+            
+            # Mutate Breed (Independent from species swap)
+            if random.random() < mutation_rate * 0.8:  # High chance to try breed mutations
+                pet = self.pets[i]
+                available_breeds = PetGene.get_available_breeds(pet.species_id, species_db)
+                if len(available_breeds) > 1:  # Only mutate if there are options
+                    # Pick a different breed
+                    new_breed = random.choice([b for b in available_breeds if b != pet.breed_id])
+                    pet.breed_id = new_breed
+                    mutated = True
                 
             # Mutate Abilities
             if random.random() < mutation_rate:

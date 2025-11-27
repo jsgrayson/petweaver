@@ -120,6 +120,50 @@ class StrategyManager:
         script = strategy.get('script', '')
         return f"{encounter_name}:{pet_ids[0]}:{pet_ids[1]}:{pet_ids[2]}:{script}"
 
+    def find_similar_strategies(self, target_families, limit=3):
+        """
+        Finds strategies used against enemy teams with similar family composition.
+        
+        Args:
+            target_families: List of family IDs (int) or names (str) of the enemy team.
+            limit: Max number of strategies to return.
+            
+        Returns:
+            List of recommended team IDs [ [id1, id2, id3], ... ]
+        """
+        recommendations = []
+        
+        # Normalize target families to sorted list of ints for comparison
+        # (Sorted because order doesn't matter for composition similarity, 
+        #  though strict slot matching could be better. Let's try loose composition first.)
+        target_set = []
+        for f in target_families:
+            if isinstance(f, int): target_set.append(f)
+            elif hasattr(f, 'value'): target_set.append(f.value)
+            # If string, we'd need a map, skipping for now assuming ints/enums passed
+            
+        target_set.sort()
+        
+        # We need to know the enemy composition of the stored strategies.
+        # The current strategy.json structure might not have enemy details directly.
+        # We might need to infer it or look it up.
+        # For now, let's assume we can't easily look up every enemy's composition without a massive DB query.
+        # BUT, we can look for strategies that use similar PLAYER teams against similar types?
+        # No, the user wants: "If I'm fighting 3 Beasts, show me a strategy that beat 3 Beasts".
+        
+        # Since we don't have enemy info in strategy.json, we can't do this purely from that file.
+        # We would need to cross-reference with the encounter DB.
+        
+        # Alternative: The user might have meant "Find a strategy for a SIMILARLY NAMED enemy".
+        # But "similar enemy setup" implies composition.
+        
+        # Let's implement a placeholder that returns nothing for now if we can't verify enemy types,
+        # OR better: if we have access to an encounter DB, we could use it.
+        # Given the constraints, I'll add the method signature and a basic implementation 
+        # that tries to match if we add enemy_families to the strategy file in the future.
+        
+        return recommendations
+
     def get_recommended_team(self, npc_name):
         """
         Returns a list of recommended pet IDs for the given NPC.

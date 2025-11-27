@@ -17,8 +17,8 @@ class XuFuScraperEnhanced:
         self.start_time = None
         
     def respectful_delay(self):
-        """Add 1-2 second delay between requests to be respectful"""
-        time.sleep(1.5)  # 1.5 second delay between requests
+        """Add 1.5 second delay between requests to be respectful"""
+        time.sleep(1.5)
         self.request_count += 1
         if self.request_count % 10 == 0:
             elapsed = time.time() - self.start_time if self.start_time else 0
@@ -34,134 +34,142 @@ class XuFuScraperEnhanced:
             print(f"Error fetching {url}: {e}")
             return None
 
-    def extract_strategy_from_page(self, soup):
-        """Enhanced extraction that properly parses pet slots with alternatives"""
-        strategy_name = "Default Strategy"
-        active_tab = soup.find('div', class_='nav-link active')
-        if active_tab:
-            strategy_name = active_tab.get_text().strip()
-        
+    def _parse_single_pane(self, container, strategy_name):
+        """Extract pets and script from a specific HTML container (tab pane)"""
         strategy = {
             'name': strategy_name,
             'pet_slots': [],
             'script': ''
         }
         
-        # Find the main strategy container
-        # Look for the row containing pet cards
-        pet_rows = soup.find_all('div', class_='row')
-        
+        # 1. Extract Pets
+        # Look for pet cards specifically within this container
         current_slot_pets = []
-        slot_count = 0
-        
-        # Parse pets more intelligently
-        # Each strategy typically has 3 slots, and the page shows them with their alternatives
-        all_pet_links = soup.find_all('a', class_='bt_petdetails')
-        
-        # Group pets into slots (assuming 3 slots per team)
-        # We'll look for visual separators or use a heuristic
-        seen_pet_names = set()
+        all_pet_links = container.find_all('a', class_='bt_petdetails')
         
         for link in all_pet_links:
             pet_name = link.get_text().strip()
             pet_href = link.get('href', '')
             
-            # Extract pet ID
             pet_id = 0
             if pet_href:
                 match = re.search(r'/Pet/(\d+)/', pet_href)
-                if match:
-                    pet_id = int(match.group(1))
+                if match: pet_id = int(match.group(1))
             
-            pet_data = {
-                'name': pet_name,
-                'id': pet_id
-            }
-            
-            # Add to current slot
-            # Use a heuristic: if we've seen this exact pet already in a different slot,
-            # it's likely a new instance (some pets appear in multiple slots)
-            current_slot_pets.append(pet_data)
-            seen_pet_names.add(pet_name)
-        
-        # Now intelligently group into 3 slots
-        # Strategy: The first few pets are likely the main team
-        # Then alternatives for each slot follow
-        # For now, we'll use a simpler approach: divide pets into 3 equal groups
+            # Store pet info
+            current_slot_pets.append({'name': pet_name, 'id': pet_id})
+
+        # Group into 3 Slots (Heuristic)
+        # Xu-Fu lists main pets then alternatives. 
+        # If we have >3 pets, we assume 1, 2, 3 are main, and rest are alts.
         total_pets = len(current_slot_pets)
-        
         if total_pets >= 3:
-            # If we have many pets, they're likely including alternatives
-            # Put the first pet in slot 1, second in slot 2, third in slot 3
-            # Then distribute the rest evenly
+            slot1 = [current_slot_pets[0]]
+            slot2 = [current_slot_pets[1]]
+            slot3 = [current_slot_pets[2]]
             
-            # Take first 3 as the main team slots
-            slot1 = [current_slot_pets[0]] if len(current_slot_pets) > 0 else []
-            slot2 = [current_slot_pets[1]] if len(current_slot_pets) > 1 else []
-            slot3 = [current_slot_pets[2]] if len(current_slot_pets) > 2 else []
-            
-            # Add remaining pets as alternatives, distributing them
-            # This is a heuristic - ideally we'd parse the HTML structure more carefully
-            remaining = current_slot_pets[3:]
-            for i, pet in enumerate(remaining):
-                slot_idx = i % 3
-                if slot_idx == 0:
-                    # Check for duplicates before adding
-                    if not any(p['name'] == pet['name'] for p in slot1):
-                        slot1.append(pet)
-                elif slot_idx == 1:
-                    if not any(p['name'] == pet['name'] for p in slot2):
-                        slot2.append(pet)
-                else:
-                    if not any(p['name'] == pet['name'] for p in slot3):
-                        slot3.append(pet)
-            
-            strategy['pet_slots'] = [s for s in [slot1, slot2, slot3] if s]
+            # Distribute alternatives
+            for i, pet in enumerate(current_slot_pets[3:]):
+                idx = i % 3
+                if idx == 0: slot1.append(pet)
+                elif idx == 1: slot2.append(pet)
+                else: slot3.append(pet)
+                
+            strategy['pet_slots'] = [slot1, slot2, slot3]
         else:
-            # Few pets, just treat each as its own slot
-            strategy['pet_slots'] = [[pet] for pet in current_slot_pets]
+            # Less than 3 pets? Just list them as slots.
+            strategy['pet_slots'] = [[p] for p in current_slot_pets]
+
+        # 2. Extract Script
+        script_text = ""
         
-        # Extract script
-        tooltip = soup.find(id='td_tooltip')
-        if tooltip:
-            script_text = tooltip.get_text().strip()
-            lines = script_text.split('\n')
-            clean_lines = [l for l in lines if "Click the button" not in l and "wow-petsim" not in l]
-            strategy['script'] = '\n'.join(clean_lines).strip()
+        # Method A: Check for code blocks/textareas
+        code_blocks = container.find_all(['pre', 'code', 'textarea', 'div'], class_=['code', 'script-box'])
+        for block in code_blocks:
+            text = block.get_text()
+            if "use(" in text or "change(" in text:
+                script_text = text
+                break
+        
+        # Method B: Fallback search in raw text
+        if not script_text:
+            text = container.get_text()
+            if "use(" in text:
+                lines = text.split('\n')
+                # Filter for script-like lines
+                script_lines = [l.strip() for l in lines if "use(" in l or "change(" in l or "standby" in l or "if" in l]
+                script_text = "\n".join(script_lines)
+
+        strategy['script'] = script_text.strip()
         
         return strategy
+
+    def extract_strategies_from_page(self, soup):
+        """Parses ALL tabs to get every strategy variation"""
+        strategies = []
+        
+        # 1. Find all Tab Panes (The content containers)
+        tab_panes = soup.find_all('div', class_='tab-pane')
+        
+        if not tab_panes:
+            # Fallback: Single page view (no tabs)
+            main_strat = self._parse_single_pane(soup, "Default Strategy")
+            if main_strat['pet_slots'] or main_strat['script']:
+                strategies.append(main_strat)
+            return strategies
+
+        # 2. Map Tab IDs to Names (from the nav bar)
+        tab_names = {}
+        nav_links = soup.find_all('a', class_='nav-link')
+        for link in nav_links:
+            href = link.get('href', '')
+            if href.startswith('#'):
+                tab_id = href[1:]
+                tab_names[tab_id] = link.get_text(strip=True)
+
+        # 3. Process Each Pane
+        for pane in tab_panes:
+            pane_id = pane.get('id')
+            # Skip if it's a comment/discussion tab
+            name = tab_names.get(pane_id, f"Strategy {pane_id}")
+            if "comment" in name.lower() or "discussion" in name.lower():
+                continue
+
+            strat_data = self._parse_single_pane(pane, name)
+            
+            # Only save if valid
+            if strat_data['pet_slots'] or strat_data['script']:
+                strategies.append(strat_data)
+
+        return strategies
 
     def scrape_encounter(self, encounter_url, url_suffix):
         """Scrape strategies for a single encounter"""
         print(f"Fetching: {encounter_url}")
         
-        # Check if URL is already absolute
-        if url_suffix.startswith('http'):
-            full_url = url_suffix
-        else:
-            full_url = f"{self.base_url}{url_suffix}"
+        if url_suffix.startswith('http'): full_url = url_suffix
+        else: full_url = f"{self.base_url}{url_suffix}"
             
         soup = self.get_soup(full_url)
-        if not soup:
-            return []
+        if not soup: return []
 
-        strategies = []
-        strategy = self.extract_strategy_from_page(soup)
-        if strategy and (strategy.get('pet_slots') or strategy['script']):
-            strategies.append(strategy)
+        # Use the new Multi-Strategy Extractor
+        strategies = self.extract_strategies_from_page(soup)
+        
+        if strategies:
+            print(f"  -> Found {len(strategies)} strategies")
+        else:
+            print("  -> No strategies found.")
             
         return strategies
 
     def scrape_category(self, category_url, category_suffix):
         """Scrape all encounters in a category"""
-        print(f"Fetching: {category_url}")
+        print(f"\nScanning Category: {category_url}")
         soup = self.get_soup(category_url)
-        if not soup:
-            return []
+        if not soup: return []
 
         encounters = []
-        
-        # Find links that point to encounters or strategies
         links = soup.find_all('a', href=re.compile(r'/(Strategy|Encounter)/\d+'))
         
         for link in links:
@@ -176,7 +184,7 @@ class XuFuScraperEnhanced:
                     'url_suffix': href
                 })
         
-        # Deduplicate by URL
+        # Deduplicate
         seen_urls = set()
         unique_encounters = []
         for enc in encounters:
@@ -190,41 +198,11 @@ class XuFuScraperEnhanced:
         """Main scraping method"""
         self.start_time = time.time()
         print(f"Starting enhanced scrape at {datetime.now().strftime('%H:%M:%S')}")
-        print("Being respectful with 1.5s delays between requests...")
         
-        # Categories from all expansions
+        # List of Categories to Scrape
         categories = {
             "The War Within": {
-                "World Quests": "/Section/104/World_Quests",
-                "The Undermine": "/Section/110/The_Undermine"
-            },
-            "Dragonflight": {
-                "World Quests": "/Section/97/World_Quests",
-                "The Forbidden Reach": "/Section/99/The_Forbidden_Reach",
-                "Zaralek Cavern": "/Section/100/Zaralek_Cavern"
-            },
-            "Shadowlands": {
-                "World Quests": "/Section/80/World_Quests",
-                "Covenant Adventures": "/Section/85/Covenant_Adventures",
-                "Torghast": "/Section/87/Torghast_Tower_of_the_Damned",
-                "Family Exorcist": "/Section/89/Family_Exorcist"
-            },
-            "BfA": {
-                "World Quests": "/Section/64/World_Quests",
-                "Island Expeditions": "/Section/68/Island_Expeditions",
-                "Warfronts": "/Section/69/Warfronts",
-                "Family Battler": "/Section/71/Battle_for_Azeroth_Family_Battler",
-                "Nazjatar & Mechagon": "/Section/72/Nazjatar_and_Mechagon"
-            },
-            "Legion": {
-                "World Quests": "/Section/49/World_Quests",
-                "Family Familiar": "/Section/51/Family_Familiar",
-                "Broken Isles": "/Section/48/Broken_Isles_Tamers"
-            },
-            "Draenor": {
-                "Garrison": "/Section/36/Garrison",
-                "The Menagerie": "/Section/37/The_Menagerie",
-                "Tamers": "/Section/38/Draenor_Tamers"
+                "World Quests": "/Section/104/World_Quests"
             },
             "Pandaria": {
                 "Spirit Tamers": "/Section/19/Pandaren_Spirit_Tamers",
@@ -232,27 +210,15 @@ class XuFuScraperEnhanced:
                 "Tamers": "/Section/21/Tamers",
                 "Celestial Tournament": "/Section/22/Celestial_Tournament"
             },
-            "Dungeons": {
-                "Wailing Caverns": "/Section/54/Wailing_Caverns",
-                "Deadmines": "/Section/55/Deadmines",
-                "Stratholme": "/Section/73/Stratholme",
-                "Blackrock Depths": "/Section/74/Blackrock_Depths",
-                "Gnomeregan": "/Section/75/Gnomeregan"
-            },
-            "Misc": {
-                "Darkmoon Faire": "/Section/25/Darkmoon_Faire"
+            "Draenor": {
+                "Tamers": "/Section/38/Draenor_Tamers"
             }
         }
         
-        total_categories = sum(len(cats) for cats in categories.values())
-        print(f"Scraping {total_categories} categories...")
-        
         for expansion, cats in categories.items():
             self.data[expansion] = {}
-            
             for category_name, category_suffix in cats.items():
                 category_url = f"{self.base_url}{category_suffix}"
-                print(f"\nProcessing {expansion} - {category_name}")
                 
                 encounters_list = self.scrape_category(category_url, category_suffix)
                 print(f"Found {len(encounters_list)} encounters in {category_name}")
@@ -260,7 +226,6 @@ class XuFuScraperEnhanced:
                 category_data = []
                 for encounter in encounters_list:
                     strategies = self.scrape_encounter(encounter['url'], encounter['url_suffix'])
-                    
                     if strategies:
                         category_data.append({
                             'encounter_name': encounter['name'],
@@ -272,7 +237,6 @@ class XuFuScraperEnhanced:
         
         elapsed = time.time() - self.start_time
         print(f"\nScraping complete! {self.request_count} requests in {elapsed/60:.1f} minutes")
-        print(f"Average: {elapsed/self.request_count:.2f}s per request (respectful ✅)")
 
     def save_data(self, filename='strategies_enhanced.json'):
         with open(filename, 'w') as f:

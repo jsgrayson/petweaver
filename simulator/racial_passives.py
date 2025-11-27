@@ -19,14 +19,19 @@ class RacialPassives:
     """Handles racial passive abilities for all 10 pet families"""
     
     @staticmethod
-    def apply_beast_passive() -> float:
+    def apply_beast_passive(pet: Pet) -> float:
         """
-        Beast: +25% damage dealt (always active)
+        Beast: +25% damage dealt when below 50% health
         
+        Args:
+            pet: The beast pet
+            
         Returns:
-            Damage multiplier (1.25)
+            Damage multiplier (1.25 if below 50% HP, 1.0 otherwise)
         """
-        return 1.25
+        if pet.stats.current_hp < (pet.stats.max_hp * 0.5):
+            return 1.25
+        return 1.0
     
     @staticmethod
     def apply_critter_passive(pet: Pet) -> float:
@@ -239,7 +244,7 @@ class RacialPassives:
             Damage multiplier to apply
         """
         if pet.family == PetFamily.BEAST:
-            return RacialPassives.apply_beast_passive()
+            return RacialPassives.apply_beast_passive(pet)
         
         if pet.family == PetFamily.CRITTER:
             return RacialPassives.apply_critter_passive(pet)

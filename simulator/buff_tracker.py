@@ -54,18 +54,22 @@ class BuffTracker:
                 return False # Prevent adding if duration becomes 0
 
         # New buff, add it
+        print(f"DEBUG: Adding buff {buff.name} to {pet.name} (ID: {id(pet)})")
         pet.active_buffs.append(buff)
+        print(f"DEBUG: Buffs on {pet.name} after add: {[b.name for b in pet.active_buffs]}")
         return True
     
     @staticmethod
     def remove_buff(pet: Pet, buff: Buff):
         """Remove a specific buff from pet"""
         if buff in pet.active_buffs:
+            print(f"DEBUG: Removing buff {buff.name} from {pet.name}")
             pet.active_buffs.remove(buff)
     
     @staticmethod
     def clear_buffs_by_type(pet: Pet, buff_type: BuffType):
         """Remove all buffs of a specific type"""
+        print(f"DEBUG: Clearing buffs of type {buff_type} from {pet.name}")
         pet.active_buffs = [b for b in pet.active_buffs if b.type != buff_type]
     
     @staticmethod
@@ -106,6 +110,7 @@ class BuffTracker:
     @staticmethod
     def decrement_durations(pet: Pet) -> List[Dict]:
         """Decrement buff durations and handle expiration"""
+        print(f"DEBUG: decrement_durations called for {pet.name}")
         events = []
         buffs_to_remove = []
         
