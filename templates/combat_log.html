@@ -1,126 +1,110 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PetWeaver - Combat Logs</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {
-            background-color: #121212;
-            color: #e0e0e0;
-        }
+{% block title %}Combat Logs - PetWeaver{% endblock %}
 
-        .card {
-            background-color: #1e1e1e;
-            border-color: #333;
-        }
-
-        .accordion-button {
-            background-color: #2c2c2c;
-            color: #fff;
-        }
-
-        .accordion-button:not(.collapsed) {
-            background-color: #3c3c3c;
-            color: #fff;
-        }
-
-        .log-event {
-            font-family: monospace;
-            padding: 2px 0;
-        }
-
-        .event-damage {
-            color: #ff6b6b;
-        }
-
-        .event-ability {
-            color: #4dabf7;
-        }
-
-        .event-buff {
-            color: #51cf66;
-        }
-    </style>
-</head>
-
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-        <div class="container">
-            <a class="navbar-brand" href="/">PetWeaver</a>
-            <div class="navbar-nav">
-                <a class="nav-link" href="/">Home</a>
-                <a class="nav-link" href="/genetic">Genetic Team Builder</a>
-                <a class="nav-link" href="/market">Market Watcher</a>
-                <a class="nav-link active" href="/combat-logs">Combat Logs</a>
-            </div>
-        </div>
-    </nav>
-
-    <div class="container">
-        <h2 class="mb-4">Battle Replays</h2>
-
-        <div class="accordion" id="logAccordion">
-            <!-- Logs will be loaded here -->
-            <div class="text-center py-5">Loading logs...</div>
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="hero-header">
+            <h1 class="hero-title">⚔️ Battle Replays</h1>
+            <p class="hero-subtitle">
+                <i class="fas fa-history me-2"></i>Analyze past battles and optimize strategies
+            </p>
+            <div class="animated-border"></div>
         </div>
     </div>
+</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        async function loadLogs() {
-            try {
-                const res = await fetch('/api/combat-logs');
-                const logs = await res.json();
-                const container = document.getElementById('logAccordion');
+<div class="row">
+    <div class="col-md-12">
+        <div class="card bg-dark border-secondary">
+            <div class="card-body p-0">
+                <div class="accordion accordion-flush" id="logAccordion">
+                    <!-- Logs will be loaded here -->
+                    <div class="text-center py-5">
+                        <i class="fas fa-spinner fa-spin fa-2x text-muted mb-3"></i>
+                        <p class="text-muted">Loading battle logs...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
 
-                if (logs.length === 0) {
-                    container.innerHTML = '<div class="text-center text-muted">No battle logs found.</div>';
-                    return;
-                }
+{% block scripts %}
+<script>
+    async function loadLogs() {
+        try {
+            const res = await fetch('/api/combat-logs');
+            const logs = await res.json();
+            const container = document.getElementById('logAccordion');
 
-                container.innerHTML = logs.map((battle, index) => `
-                    <div class="accordion-item bg-dark border-secondary">
-                        <h2 class="accordion-header">
-                            <button class="accordion-button ${index !== 0 ? 'collapsed' : ''}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${index}">
-                                <div>
-                                    <strong>Vs ${battle.enemy}</strong>
-                                    <small class="d-block text-muted">${new Date(battle.timestamp * 1000).toLocaleString()}</small>
+            if (logs.length === 0) {
+                container.innerHTML = '<div class="text-center py-5 text-muted">No battle logs found.</div>';
+                return;
+            }
+
+            container.innerHTML = logs.map((battle, index) => `
+                <div class="accordion-item bg-dark border-bottom border-secondary">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button ${index !== 0 ? 'collapsed' : ''} bg-dark text-white shadow-none" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${index}">
+                            <div class="d-flex align-items-center w-100">
+                                <div class="me-3">
+                                    <i class="fas fa-swords fa-lg text-warning"></i>
                                 </div>
-                            </button>
-                        </h2>
-                        <div id="collapse${index}" class="accordion-collapse collapse ${index === 0 ? 'show' : ''}" data-bs-parent="#logAccordion">
-                            <div class="accordion-body">
-                                ${battle.turns.map(turn => `
-                                    <div class="mb-3">
-                                        <h6 class="border-bottom border-secondary pb-1">Turn ${turn.number}</h6>
+                                <div>
+                                    <div class="fw-bold">Vs ${battle.enemy}</div>
+                                    <small class="text-muted">${new Date(battle.timestamp * 1000).toLocaleString()}</small>
+                                </div>
+                                <div class="ms-auto me-3">
+                                    <span class="badge ${battle.result === 'WIN' ? 'bg-success' : 'bg-danger'}">${battle.result || 'UNKNOWN'}</span>
+                                </div>
+                            </div>
+                        </button>
+                    </h2>
+                    <div id="collapse${index}" class="accordion-collapse collapse ${index === 0 ? 'show' : ''}" data-bs-parent="#logAccordion">
+                        <div class="accordion-body bg-black">
+                            ${battle.turns.map(turn => `
+                                <div class="mb-3">
+                                    <h6 class="border-bottom border-secondary pb-1 text-info">Turn ${turn.number}</h6>
+                                    <div class="ps-2 border-start border-secondary">
                                         ${turn.events.map(event => formatEvent(event)).join('')}
                                     </div>
-                                `).join('')}
-                            </div>
+                                </div>
+                            `).join('')}
                         </div>
                     </div>
-                `).join('');
+                </div>
+            `).join('');
 
-            } catch (e) {
-                console.error(e);
-                document.getElementById('logAccordion').innerHTML = '<div class="text-danger text-center">Error loading logs</div>';
-            }
+        } catch (e) {
+            console.error(e);
+            document.getElementById('logAccordion').innerHTML = '<div class="text-danger text-center py-5">Error loading logs</div>';
+        }
+    }
+
+    function formatEvent(event) {
+        let colorClass = 'text-light';
+        let icon = '<i class="fas fa-info-circle me-2 text-muted"></i>';
+
+        if (event.type === 'damage') {
+            colorClass = 'text-danger';
+            icon = '<i class="fas fa-heart-broken me-2"></i>';
+        } else if (event.type === 'ability_use') {
+            colorClass = 'text-info';
+            icon = '<i class="fas fa-bolt me-2"></i>';
+        } else if (event.type === 'buff_gain') {
+            colorClass = 'text-success';
+            icon = '<i class="fas fa-arrow-up me-2"></i>';
+        } else if (event.type === 'buff_fades') {
+            colorClass = 'text-warning';
+            icon = '<i class="fas fa-arrow-down me-2"></i>';
         }
 
-        function formatEvent(event) {
-            let colorClass = '';
-            if (event.type === 'damage') colorClass = 'event-damage';
-            else if (event.type === 'ability_use') colorClass = 'event-ability';
-            else if (event.type === 'buff_gain') colorClass = 'event-buff';
+        return `<div class="py-1 ${colorClass}" style="font-family: monospace; font-size: 0.9rem;">${icon}${event.raw}</div>`;
+    }
 
-            return `<div class="log-event ${colorClass}">${event.raw}</div>`;
-        }
-
-        loadLogs();
-    </script>
-</body>
-
-</html>
+    loadLogs();
+</script>
+{% endblock %}

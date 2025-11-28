@@ -32,19 +32,8 @@ state = {
 
 from blizzard_oauth import BlizzardOAuth
 
-app = Flask(__name__)
-
-# Global state
-state = {
-    "status": "IDLE", # IDLE, RUNNING, COMPLETED, ERROR
-    "log": [],
-    "last_update": None,
-    "stats": {
-        "pets": 0,
-        "strategies": 0,
-        "ready": 0
-    }
-}
+# Default WoW Addon Path (can be overridden by .env)
+ADDON_PATH = os.environ.get('WOW_ADDON_PATH', '/Applications/World of Warcraft/_retail_/Interface/AddOns')
 
 from market_manager import MarketManager
 from combat_manager import CombatManager
@@ -385,27 +374,6 @@ def manage_wishlist():
         save_wishlist(wishlist)
         return jsonify({"status": "success", "wishlist": wishlist})
 
-@app.route('/api/scan_wild_pet', methods=['POST'])
-def scan_wild_pet():
-    """Receives data about a wild pet and checks against wishlist"""
-    data = request.json
-    species_id = data.get('speciesId')
-    breed_id = data.get('breedId')
-    
-    wishlist = load_wishlist()
-    
-    for item in wishlist:
-        if int(item['speciesId']) == int(species_id) and int(item['breedId']) == int(breed_id):
-            # Match found!
-            alert_msg = f"🚨 WISHLIST ALERT: Found {item['petName']} with breed {item['breedName']}!"
-            log_message(alert_msg)
-            return jsonify({
-                "alert": True, 
-                "message": alert_msg,
-                "pet": item
-            })
-            
-    return jsonify({"alert": False})
 
 def run_automation_thread(skip_fetch, force_scrape, addon_path):
     global state
@@ -869,23 +837,18 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
                 collection_data = json.load(f)
                 
             # Extract available species IDs
+            # Extract available species IDs
             available_species = []
             for pet in collection_data.get('pets', []):
-                # ... existing logic ...
-            
-            # Pass collection to MarketManager for cross-referencing
-            market_manager.set_collection(collection_data.get('pets', []))
                 if 'species' in pet:
                     sid = pet['species']['id']
                     # Only include if we have ability data for it
+                    # Note: species_abilities keys are strings in JSON
                     if str(sid) in species_abilities:
-                        # Apply my_pets_only filter
-                        if my_pets_only:
-                            # Only include pets the user actually owns
-                            available_species.append(sid)
-                        elif str(sid) in species_abilities:
-                            # Include all pets with ability data
-                            available_species.append(sid)
+                        available_species.append(sid)
+            
+            # Pass collection to MarketManager for cross-referencing
+            market_manager.set_collection(collection_data.get('pets', []))
             
             # Remove duplicates
             available_species = list(set(available_species))
@@ -1004,38 +967,38 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
         evaluator.real_abilities = real_abilities
         evaluator.real_pet_stats = real_pet_stats
         evaluator.pt_base_stats = pt_base_stats # Pass PetTracker base stats
-            # 3. Initialize Evolution Engine
-            engine = EvolutionEngine(
-                fitness_evaluator=evaluator,
-                population_size=pop_size,
-                mutation_rate=0.5, # High mutation for exploration
-                elitism_rate=0.1
-            )
+        # 3. Initialize Evolution Engine
+        engine = EvolutionEngine(
+            fitness_evaluator=evaluator,
+            population_size=pop_size,
+            mutation_rate=0.5, # High mutation for exploration
+            elitism_rate=0.1
+        )
             
-            # STRATEGY SEEDING: Check for known strategies
-            seed_teams = []
-            try:
-                # Use global strategy_manager initialized at top of app.py
-                recommended_ids = strategy_manager.get_recommended_team(target_name)
-                if recommended_ids and all(pid > 0 for pid in recommended_ids):
-                    genetic_state["log"].append(f"💡 Found known strategy! Seeding: {recommended_ids}")
-                    seed_teams.append(recommended_ids)
-                else:
-                    # Try similarity search (Placeholder for now)
-                    # similar_seeds = strategy_manager.find_similar_strategies(target_families=[p.family for p in target_team.pets])
-                    # if similar_seeds: seed_teams.extend(similar_seeds)
-                    pass
-            except Exception as e:
-                genetic_state["log"].append(f"⚠️ Strategy lookup failed: {e}")
+        # STRATEGY SEEDING: Check for known strategies
+        seed_teams = []
+        try:
+            # Use global strategy_manager initialized at top of app.py
+            recommended_ids = strategy_manager.get_recommended_team(target_name)
+            if recommended_ids and all(pid > 0 for pid in recommended_ids):
+                genetic_state["log"].append(f"💡 Found known strategy! Seeding: {recommended_ids}")
+                seed_teams.append(recommended_ids)
+            else:
+                # Try similarity search (Placeholder for now)
+                # similar_seeds = strategy_manager.find_similar_strategies(target_families=[p.family for p in target_team.pets])
+                # if similar_seeds: seed_teams.extend(similar_seeds)
+                pass
+        except Exception as e:
+            genetic_state["log"].append(f"⚠️ Strategy lookup failed: {e}")
 
-            genetic_state["log"].append(f"🧬 Initializing Population (Size: {pop_size})...")
-            engine.initialize_population(
-                available_species, 
-                real_abilities, # Use the merged ability DB
-                seed_teams=seed_teams,
-                npc_name=target_name,
-                strategy_manager=strategy_manager
-            )
+        genetic_state["log"].append(f"🧬 Initializing Population (Size: {pop_size})...")
+        engine.initialize_population(
+            available_species, 
+            real_abilities, # Use the merged ability DB
+            seed_teams=seed_teams,
+            npc_name=target_name,
+            strategy_manager=strategy_manager
+        )
         
         genetic_state["log"].append("🧬 Population Initialized")
         
@@ -2148,4 +2111,4 @@ def fetch_strategy():
 if __name__ == '__main__':
     update_stats()
     print("🌐 Starting PetWeaver Desktop App on http://127.0.0.1:5001")
-    app.run(debug=False, port=5001)
+    app.run(debug=False, port=5002)

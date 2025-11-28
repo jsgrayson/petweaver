@@ -1,176 +1,210 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PetWeaver Desktop</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
+{% block title %}PetWeaver - Command Center{% endblock %}
 
-<body>
-    <div class="container">
-        <header>
-            <div class="logo">
-                <h1>PetWeaver</h1>
-                <span class="badge">PRO</span>
+{% block content %}
+<!-- Hero Header -->
+<div class="row mb-5">
+    <div class="col-md-12">
+        <div class="hero-header">
+            <h1 class="hero-title">🐾 Pet Battle Intelligence</h1>
+            <p class="hero-subtitle">
+                <i class="fas fa-paw me-2"></i>Automated strategy optimization and collection management
+            </p>
+            <div class="animated-border"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Stats Grid -->
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card widget-card h-100">
+            <div class="card-body text-center">
+                <h6 class="text-light mb-2"><i class="fas fa-dragon me-2"></i>My Pets</h6>
+                <h2 class="mb-0 text-white fw-bold" id="stat-pets">0</h2>
+                <small class="text-muted">Collection Size</small>
             </div>
-            <nav>
-                <a href="/" class="active">Home</a>
-                <a href="/dashboard">Dashboard</a>
-                <a href="/strategies">Strategies</a>
-                <a href="/hunting">Hunting</a>
-                <a href="/leveling">Leveling</a>
-                <a href="/calendar">Calendar</a>
-            </nav>
-            <div class="status-indicator" id="status-badge">IDLE</div>
-        </header>
-
-        <main>
-            <!-- Stats Grid -->
-            <div class="grid">
-                <div class="card stat-card">
-                    <h3>My Pets</h3>
-                    <div class="value" id="stat-pets">0</div>
-                </div>
-                <div class="card stat-card">
-                    <h3>Strategies</h3>
-                    <div class="value" id="stat-strategies">0</div>
-                </div>
-                <div class="card stat-card">
-                    <h3>Ready to Battle</h3>
-                    <div class="value highlight" id="stat-ready">0</div>
-                </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card widget-card h-100">
+            <div class="card-body text-center">
+                <h6 class="text-light mb-2"><i class="fas fa-book-open me-2"></i>Strategies</h6>
+                <h2 class="mb-0 text-white fw-bold" id="stat-strategies">0</h2>
+                <small class="text-muted">Known Battles</small>
             </div>
-            <div class="card">
-                <h2>Upcoming Events</h2>
-                <div id="upcoming-events">Loading...</div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card widget-card h-100 border-success">
+            <div class="card-body text-center">
+                <h6 class="text-light mb-2"><i class="fas fa-check-circle me-2"></i>Ready to Battle</h6>
+                <h2 class="mb-0 text-success fw-bold" id="stat-ready">0</h2>
+                <small class="text-success">Teams Available</small>
             </div>
+        </div>
+    </div>
+</div>
 
-            <!-- Controls -->
-            <div class="card controls-card">
-                <h2>Automation Controls</h2>
-                <div class="options">
-                    <label class="toggle">
-                        <input type="checkbox" id="skip-fetch" checked>
-                        <span class="slider"></span>
-                        <span class="label-text">Skip Blizzard Fetch (Use Local)</span>
-                    </label>
-                    <label class="toggle">
-                        <input type="checkbox" id="force-scrape">
-                        <span class="slider"></span>
-                        <span class="label-text">Force Re-Scrape</span>
-                    </label>
+<div class="row">
+    <!-- Automation Controls -->
+    <div class="col-md-8 mb-4">
+        <div class="card h-100">
+            <div class="card-header bg-dark text-white">
+                <i class="fas fa-cogs me-2"></i>Automation Controls
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="skip-fetch" checked>
+                            <label class="form-check-label text-white" for="skip-fetch">Skip Blizzard Fetch (Use
+                                Local)</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="force-scrape">
+                            <label class="form-check-label text-white" for="force-scrape">Force Re-Scrape</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label text-white small">Addon Path</label>
+                        <input type="text" id="addon-path" class="form-control bg-dark text-white border-secondary"
+                            value="{{ default_path }}" placeholder="/path/to/AddOns/PetWeaver">
+                    </div>
                 </div>
-                <div class="input-group">
-                    <label>Addon Path</label>
-                    <input type="text" id="addon-path" value="{{ default_path }}"
-                        placeholder="/path/to/AddOns/PetWeaver">
-                </div>
-                <button id="btn-run" class="btn-primary" onclick="runAutomation()">
-                    <span class="icon">▶</span> SYNC STRATEGIES
+                <button id="btn-run" class="btn btn-primary w-100 py-2" onclick="runAutomation()">
+                    <i class="fas fa-play me-2"></i>SYNC STRATEGIES
                 </button>
             </div>
-
-            <!-- Console -->
-            <div class="card console-card">
-                <div class="console-header">
-                    <h3>Activity Log</h3>
-                    <span id="last-update">Last Update: Never</span>
-                </div>
-                <div class="console-output" id="console-log">
-                    <div class="log-entry">Waiting for command...</div>
-                </div>
-            </div>
-        </main>
+        </div>
     </div>
 
-    <script>
-        let isRunning = false;
+    <!-- Upcoming Events -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-header bg-dark text-white">
+                <i class="fas fa-calendar-alt me-2"></i>Upcoming Events
+            </div>
+            <div class="card-body">
+                <div id="upcoming-events" class="list-group list-group-flush">
+                    <div class="text-muted text-center">Loading...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
-        function updateStatus() {
-            fetch('/api/status')
-                .then(response => response.json())
-                .then(data => {
-                    // Update Stats
-                    document.getElementById('stat-pets').innerText = data.stats.pets;
-                    document.getElementById('stat-strategies').innerText = data.stats.strategies;
-                    document.getElementById('stat-ready').innerText = data.stats.ready;
-                    document.getElementById('last-update').innerText = data.last_update || 'Never';
+<!-- Console Output -->
+<div class="row">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-terminal me-2"></i>Activity Log</span>
+                <small class="text-muted" id="last-update">Last Update: Never</small>
+            </div>
+            <div class="card-body bg-black p-0">
+                <div class="console-output p-3" id="console-log"
+                    style="height: 300px; overflow-y: auto; font-family: monospace; color: #0f0;">
+                    <div class="log-entry">> Waiting for command...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
 
-                    // Update Status Badge
-                    const badge = document.getElementById('status-badge');
-                    badge.innerText = data.status;
-                    badge.className = 'status-indicator ' + data.status.toLowerCase();
+{% block scripts %}
+<script>
+    let isRunning = false;
 
-                    // Update Log
-                    const logDiv = document.getElementById('console-log');
-                    logDiv.innerHTML = data.log.map(line => `<div class="log-entry">${line}</div>`).join('');
+    function updateStatus() {
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                // Update Stats
+                document.getElementById('stat-pets').innerText = data.stats.pets;
+                document.getElementById('stat-strategies').innerText = data.stats.strategies;
+                document.getElementById('stat-ready').innerText = data.stats.ready;
+                document.getElementById('last-update').innerText = data.last_update || 'Never';
 
-                    // Auto scroll if running
-                    if (data.status === 'RUNNING') {
-                        logDiv.scrollTop = logDiv.scrollHeight;
-                        document.getElementById('btn-run').disabled = true;
-                        document.getElementById('btn-run').innerText = 'RUNNING...';
-                        isRunning = true;
-                    } else {
-                        if (isRunning) {
-                            document.getElementById('btn-run').disabled = false;
-                            document.getElementById('btn-run').innerHTML = '<span class="icon">▶</span> SYNC STRATEGIES';
-                            isRunning = false;
-                        }
+                // Update Log
+                const logDiv = document.getElementById('console-log');
+                logDiv.innerHTML = data.log.map(line => `<div class="log-entry">> ${line}</div>`).join('');
+
+                // Auto scroll if running
+                if (data.status === 'RUNNING') {
+                    logDiv.scrollTop = logDiv.scrollHeight;
+                    const btn = document.getElementById('btn-run');
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>RUNNING...';
+                    isRunning = true;
+                } else {
+                    if (isRunning) {
+                        const btn = document.getElementById('btn-run');
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fas fa-play me-2"></i>SYNC STRATEGIES';
+                        isRunning = false;
                     }
-                });
-        }
+                }
+            });
+    }
 
-        function runAutomation() {
-            const skipFetch = document.getElementById('skip-fetch').checked;
-            const forceScrape = document.getElementById('force-scrape').checked;
-            const addonPath = document.getElementById('addon-path').value;
+    function runAutomation() {
+        const skipFetch = document.getElementById('skip-fetch').checked;
+        const forceScrape = document.getElementById('force-scrape').checked;
+        const addonPath = document.getElementById('addon-path').value;
 
-            fetch('/api/run', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    skip_fetch: skipFetch,
-                    force_scrape: forceScrape,
-                    addon_path: addonPath
-                })
+        fetch('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                skip_fetch: skipFetch,
+                force_scrape: forceScrape,
+                addon_path: addonPath
             })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.error) alert(data.error);
-                    updateStatus();
-                });
-        }
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) alert(data.error);
+                updateStatus();
+            });
+    }
 
-        // Load upcoming events for calendar
-        function loadUpcomingEvents() {
-            fetch('/api/calendar')
-                .then(r => r.json())
-                .then(data => {
-                    const container = document.getElementById('upcoming-events');
-                    if (!container) return;
-                    container.innerHTML = data.map(item => {
-                        const squirt = item.is_squirt ? '✅' : '';
-                        const pbw = item.is_pet_battle_week ? '✅' : '';
-                        return `<div>${item.date} (${item.weekday}) ${squirt} ${pbw}</div>`;
-                    }).join('');
-                })
-                .catch(err => {
-                    console.error('Failed to load calendar', err);
-                });
-        }
+    // Load upcoming events for calendar
+    function loadUpcomingEvents() {
+        fetch('/api/calendar')
+            .then(r => r.json())
+            .then(data => {
+                const container = document.getElementById('upcoming-events');
+                if (!container) return;
+                if (data.length === 0) {
+                    container.innerHTML = '<div class="text-muted text-center">No upcoming events</div>';
+                    return;
+                }
+                container.innerHTML = data.map(item => {
+                    const squirt = item.is_squirt ? '<span class="badge bg-info ms-2">Squirt</span>' : '';
+                    const pbw = item.is_pet_battle_week ? '<span class="badge bg-warning text-dark ms-2">Bonus Event</span>' : '';
+                    return `
+                        <div class="list-group-item bg-transparent text-white border-secondary">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span>${item.date} (${item.weekday})</span>
+                                <div>${squirt}${pbw}</div>
+                            </div>
+                        </div>`;
+                }).join('');
+            })
+            .catch(err => {
+                console.error('Failed to load calendar', err);
+            });
+    }
 
-        // Poll every 1 second
-        setInterval(() => {
-            updateStatus();
-            loadUpcomingEvents();
-        }, 1000);
+    // Poll every 1 second
+    setInterval(() => {
         updateStatus();
         loadUpcomingEvents();
-    </script>
-</body>
-
-</html>
+    }, 1000);
+    updateStatus();
+    loadUpcomingEvents();
+</script>
+{% endblock %}

@@ -1,118 +1,111 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pet Hunting - PetWeaver</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
+{% block title %}Pet Hunting - PetWeaver{% endblock %}
 
-<body>
-    <div class="container">
-        <header>
-            <div class="logo">
-                <h1>🎯 Pet Hunting Guide</h1>
-            </div>
-            <nav>
-                <a href="/">Home</a>
-                <a href="/dashboard">Dashboard</a>
-                <a href="/strategies">Strategies</a>
-                <a href="/wizard">Wizard</a>
-                <a href="/hunting" class="active">Hunting</a>
-                <a href="/leveling">Leveling</a>
-            </nav>
-        </header>
-
-        <main>
-            <!-- Stats -->
-            <div class="card">
-                <h2>Missing Pets Priority List</h2>
-                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
-                    Pets you need to unlock more strategies, sorted by priority
-                </p>
-            </div>
-
-            <!-- Missing Pets List -->
-            <div id="missing-pets">
-                <div class="loading">Loading missing pets...</div>
-            </div>
-        </main>
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="hero-header">
+            <h1 class="hero-title">🎯 Pet Hunting Guide</h1>
+            <p class="hero-subtitle">
+                <i class="fas fa-crosshairs me-2"></i>Prioritized list of pets to capture for your strategies
+            </p>
+            <div class="animated-border"></div>
+        </div>
     </div>
+</div>
 
-    <script>
-        function loadMissingPets() {
-            fetch('/api/hunting/missing')
-                .then(res => res.json())
-                .then(data => {
-                    const container = document.getElementById('missing-pets');
+<!-- Missing Pets List -->
+<div class="row">
+    <div class="col-md-12">
+        <div id="missing-pets">
+            <div class="text-center py-5">
+                <i class="fas fa-spinner fa-spin fa-2x text-muted mb-3"></i>
+                <p class="text-muted">Analyzing collection and strategies...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
 
-                    if (data.length === 0) {
-                        container.innerHTML = `
-                            <div class="card">
-                                <div style="text-align: center; padding: 2rem; color: var(--success);">
-                                    <h2>🎉 You have all required pets!</h2>
-                                    <p>No missing pets for your ready strategies.</p>
-                                </div>
-                            </div>
-                        `;
-                        return;
-                    }
+{% block scripts %}
+<script>
+    function loadMissingPets() {
+        fetch('/api/hunting/missing')
+            .then(res => res.json())
+            .then(data => {
+                const container = document.getElementById('missing-pets');
 
-                    container.innerHTML = data.map((pet, index) => `
-                        <div class="card" style="margin-bottom: 1rem;">
-                            <div style="display: flex; justify-content: space-between; align-items: start; gap: 1rem;">
-                                <div style="flex: 1;">
-                                    <h3 style="margin: 0 0 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
-                                        <span style="color: var(--primary);">#${index + 1}</span>
-                                        ${pet.name}
-                                        <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #ef4444;">
-                                            Needed for ${pet.needed_for.length} encounter(s)
-                                        </span>
-                                    </h3>
-                                    
-                                    <!-- Location Info -->
-                                    <div style="margin: 0.75rem 0; padding: 0.75rem; background: rgba(59, 130, 246, 0.1); border-left: 3px solid var(--primary); border-radius: 4px;">
-                                        <div style="display: grid; grid-template-columns: auto 1fr; gap: 0.5rem; font-size: 0.9rem;">
-                                            <strong style="color: var(--text-muted);">📍 Zone:</strong>
-                                            <span>${pet.zone || 'Unknown'}</span>
-                                            
-                                            <strong style="color: var(--text-muted);">🎁 Source:</strong>
-                                            <span>${pet.source || 'Unknown'}</span>
-                                            
-                                            <strong style="color: var(--text-muted);">🗺️ Coords:</strong>
-                                            <span>${pet.coords || 'N/A'}</span>
-                                        </div>
-                                    </div>
-                                    
-                                    <div style="margin-top: 0.75rem;">
-                                        <strong style="color: var(--text-muted); font-size: 0.9rem;">Used in:</strong>
-                                        <div style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                                            ${pet.needed_for.slice(0, 5).map(enc =>
-                        `<span class="pet-badge">${enc}</span>`
-                    ).join('')}
-                                            ${pet.needed_for.length > 5 ?
-                            `<span style="color: var(--text-muted); font-size: 0.85rem;">+${pet.needed_for.length - 5} more</span>`
-                            : ''}
-                                        </div>
-                                    </div>
-                                </div>
-                                <a href="${pet.warcraftpets_url || 'https://www.google.com/search?q=' + encodeURIComponent(pet.name + ' warcraftpets')}" 
-                                   target="_blank" 
-                                   class="btn-primary" 
-                                   style="width: auto; padding: 0.5rem 1rem; text-decoration: none; white-space: nowrap;">
-                                    More Info
-                                </a>
+                if (data.length === 0) {
+                    container.innerHTML = `
+                        <div class="card bg-dark border-success">
+                            <div class="card-body text-center py-5">
+                                <i class="fas fa-check-circle fa-4x text-success mb-3"></i>
+                                <h2 class="text-success">Collection Complete!</h2>
+                                <p class="text-white">You have all the pets required for your current strategies.</p>
                             </div>
                         </div>
-                    `).join('');
-                });
-        }
+                    `;
+                    return;
+                }
 
-        // Load on page load
-        loadMissingPets();
-    </script>
-</body>
+                container.innerHTML = data.map((pet, index) => `
+                    <div class="card mb-3 border-secondary">
+                        <div class="card-body">
+                            <div class="row align-items-center">
+                                <div class="col-md-8">
+                                    <div class="d-flex align-items-center mb-2">
+                                        <span class="badge bg-primary me-3">#${index + 1}</span>
+                                        <h4 class="mb-0 text-white">${pet.name}</h4>
+                                        <span class="badge bg-danger bg-opacity-25 text-danger ms-3">
+                                            Needed for ${pet.needed_for.length} encounter(s)
+                                        </span>
+                                    </div>
+                                    
+                                    <div class="p-3 rounded bg-black border border-secondary mb-3">
+                                        <div class="row g-2 text-sm">
+                                            <div class="col-md-4">
+                                                <strong class="text-muted">📍 Zone:</strong>
+                                                <span class="text-info">${pet.zone || 'Unknown'}</span>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <strong class="text-muted">🎁 Source:</strong>
+                                                <span class="text-info">${pet.source || 'Unknown'}</span>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <strong class="text-muted">🗺️ Coords:</strong>
+                                                <span class="text-info">${pet.coords || 'N/A'}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <small class="text-muted d-block mb-1">Used in strategies:</small>
+                                        <div class="d-flex flex-wrap gap-2">
+                                            ${pet.needed_for.slice(0, 5).map(enc =>
+                    `<span class="badge bg-secondary text-light">${enc}</span>`
+                ).join('')}
+                                            ${pet.needed_for.length > 5 ?
+                        `<span class="badge bg-dark text-muted">+${pet.needed_for.length - 5} more</span>`
+                        : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 text-end mt-3 mt-md-0">
+                                    <a href="${pet.warcraftpets_url || 'https://www.google.com/search?q=' + encodeURIComponent(pet.name + ' warcraftpets')}" 
+                                       target="_blank" 
+                                       class="btn btn-outline-info">
+                                        <i class="fas fa-external-link-alt me-2"></i>More Info
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            });
+    }
 
-</html>
+    // Load on page load
+    loadMissingPets();
+</script>
+{% endblock %}

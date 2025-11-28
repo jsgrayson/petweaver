@@ -1,286 +1,212 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PetWeaver - Collection</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        body {
-            background-color: #1a1d21;
-            color: #e0e0e0;
-        }
+{% block title %}Pet Collection - PetWeaver{% endblock %}
 
-        .card {
-            background-color: #2c3036;
-            border-color: #444;
-        }
-
-        .navbar {
-            background-color: #212529;
-        }
-
-        .pet-card {
-            transition: transform 0.2s;
-        }
-
-        .pet-card:hover {
-            transform: translateY(-5px);
-            border-color: #007bff;
-        }
-
-        .quality-3 {
-            color: #0070dd;
-        }
-
-        /* Rare */
-        .quality-2 {
-            color: #1eff00;
-        }
-
-        /* Uncommon */
-        .quality-1 {
-            color: #ffffff;
-        }
-
-        /* Common */
-        .quality-0 {
-            color: #9d9d9d;
-        }
-
-        /* Poor */
-        .search-help {
-            font-size: 0.8em;
-            color: #888;
-        }
-    </style>
-</head>
-
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark mb-4">
-        <div class="container">
-            <a class="navbar-brand" href="/">PetWeaver</a>
-            <div class="collapse navbar-collapse">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item"><a class="nav-link" href="/">Home</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/genetic">Genetic Builder</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/wishlist">Wishlist</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/market">Market Watcher</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/combat">Combat Log</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/duplicates">Duplicates</a></li>
-                    <li class="nav-item"><a class="nav-link active" href="/collection">Collection</a></li>
-                </ul>
-            </div>
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="hero-header">
+            <h1 class="hero-title">🐾 Pet Collection</h1>
+            <p class="hero-subtitle">
+                <i class="fas fa-search me-2"></i>Browse and filter your entire pet collection
+            </p>
+            <div class="animated-border"></div>
         </div>
-    </nav>
+    </div>
+</div>
 
-    <div class="container">
-        <div class="row mb-4">
-            <div class="col-md-12">
-                <h2><i class="fas fa-paw text-primary"></i> Pet Collection</h2>
-
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card bg-dark border-secondary">
+            <div class="card-body">
                 <!-- Search Bar -->
                 <div class="input-group mb-2">
-                    <span class="input-group-text bg-dark text-light"><i class="fas fa-search"></i></span>
-                    <input type="text" class="form-control bg-dark text-light" id="searchInput"
+                    <span class="input-group-text bg-black text-light border-secondary"><i
+                            class="fas fa-search"></i></span>
+                    <input type="text" class="form-control bg-black text-light border-secondary" id="searchInput"
                         placeholder="Search... e.g. 'level > 20 AND quality = 3' OR 'name contains Dragon'">
-                    <button class="btn btn-primary" onclick="applySearch()">Search</button>
+                    <button class="btn btn-primary" onclick="applySearch()">
+                        <i class="fas fa-filter me-2"></i>Filter
+                    </button>
                 </div>
-                <div class="search-help">
-                    Supported: <code>AND</code>, <code>OR</code>, <code>NOT</code>, <code>&gt;</code>,
+                <div class="small text-muted">
+                    <i class="fas fa-info-circle me-1"></i>Supported: <code>AND</code>, <code>OR</code>,
+                    <code>NOT</code>, <code>&gt;</code>,
                     <code>&lt;</code>, <code>=</code>, <code>!=</code>, <code>contains</code>.
                     Fields: <code>name</code>, <code>level</code>, <code>quality</code>, <code>speed</code>,
                     <code>power</code>, <code>health</code>.
                 </div>
             </div>
         </div>
-
-        <div class="row mb-3">
-            <div class="col-12 text-end text-muted">
-                Showing <span id="countDisplay">0</span> pets
-            </div>
-        </div>
-
-        <!-- Pet Grid -->
-        <div class="row" id="petGrid">
-            <div class="col-12 text-center py-5">
-                <i class="fas fa-spinner fa-spin fa-2x"></i><br>Loading collection...
-            </div>
-        </div>
     </div>
+</div>
 
-    <script>
-        let allPets = [];
-        const BREED_NAMES = {
-            3: "H/H", 4: "P/P", 5: "S/S", 6: "H/P", 7: "H/S", 8: "P/S", 9: "B/B", 10: "P/B", 11: "S/B", 12: "H/B"
-        };
+<div class="row mb-3">
+    <div class="col-12 text-end text-muted">
+        Showing <span id="countDisplay" class="text-white fw-bold">0</span> pets
+    </div>
+</div>
 
-        async function loadPets() {
-            try {
-                const res = await fetch('/api/collection/all');
-                allPets = await res.json();
-                renderPets(allPets);
-            } catch (e) {
-                document.getElementById('petGrid').innerHTML = '<div class="col-12 text-center text-danger">Failed to load pets.</div>';
-            }
+<!-- Pet Grid -->
+<div class="row g-4" id="petGrid">
+    <div class="col-12 text-center py-5">
+        <i class="fas fa-spinner fa-spin fa-2x text-muted mb-3"></i>
+        <p class="text-muted">Loading collection...</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let allPets = [];
+    const BREED_NAMES = {
+        3: "H/H", 4: "P/P", 5: "S/S", 6: "H/P", 7: "H/S", 8: "P/S", 9: "B/B", 10: "P/B", 11: "S/B", 12: "H/B"
+    };
+
+    const QUALITY_COLORS = {
+        0: '#9d9d9d', // Poor
+        1: '#ffffff', // Common
+        2: '#1eff00', // Uncommon
+        3: '#0070dd', // Rare
+        4: '#a335ee', // Epic
+        5: '#ff8000'  // Legendary
+    };
+
+    async function loadPets() {
+        try {
+            const res = await fetch('/api/collection/all');
+            allPets = await res.json();
+            renderPets(allPets);
+        } catch (e) {
+            document.getElementById('petGrid').innerHTML = '<div class="col-12 text-center text-danger py-5">Failed to load pets.</div>';
+        }
+    }
+
+    function renderPets(pets) {
+        const grid = document.getElementById('petGrid');
+        const countDisplay = document.getElementById('countDisplay');
+
+        grid.innerHTML = '';
+        countDisplay.innerText = pets.length;
+
+        if (pets.length === 0) {
+            grid.innerHTML = '<div class="col-12 text-center text-muted py-5">No pets found matching criteria.</div>';
+            return;
         }
 
-        function renderPets(pets) {
-            const grid = document.getElementById('petGrid');
-            const countDisplay = document.getElementById('countDisplay');
+        // Limit render to 100 for performance if list is huge
+        const displayPets = pets.slice(0, 100);
 
-            grid.innerHTML = '';
-            countDisplay.innerText = pets.length;
+        displayPets.forEach(pet => {
+            const breedName = BREED_NAMES[pet.stats?.breedId] || '?';
+            const qualityColor = QUALITY_COLORS[pet.quality] || '#ffffff';
 
-            if (pets.length === 0) {
-                grid.innerHTML = '<div class="col-12 text-center text-muted">No pets found matching criteria.</div>';
-                return;
-            }
-
-            // Limit render to 100 for performance if list is huge
-            const displayPets = pets.slice(0, 100);
-
-            displayPets.forEach(pet => {
-                const breedName = BREED_NAMES[pet.stats?.breedId] || '?';
-                const html = `
-                    <div class="col-md-3 mb-3">
-                        <div class="card pet-card h-100">
-                            <div class="card-body">
-                                <h6 class="card-title quality-${pet.quality}">${pet.name}</h6>
-                                <div class="small text-muted mb-2">Lvl ${pet.level} | ${breedName}</div>
-                                <div class="d-flex justify-content-between small">
-                                    <span title="Health">❤️ ${pet.stats?.health}</span>
-                                    <span title="Power">⚔️ ${pet.stats?.power}</span>
-                                    <span title="Speed">👟 ${pet.stats?.speed}</span>
-                                </div>
+            const html = `
+                <div class="col-md-6 col-lg-4 col-xl-3">
+                    <div class="card h-100 bg-dark border-secondary pet-card">
+                        <div class="card-body">
+                            <h6 class="card-title mb-2 text-truncate" style="color: ${qualityColor}" title="${pet.name}">
+                                ${pet.name}
+                            </h6>
+                            <div class="small text-muted mb-3 d-flex justify-content-between">
+                                <span>Lvl ${pet.level}</span>
+                                <span class="badge bg-secondary text-light">${breedName}</span>
+                            </div>
+                            <div class="d-flex justify-content-between small text-light">
+                                <span title="Health"><i class="fas fa-heart text-danger me-1"></i>${pet.stats?.health}</span>
+                                <span title="Power"><i class="fas fa-fist-raised text-warning me-1"></i>${pet.stats?.power}</span>
+                                <span title="Speed"><i class="fas fa-tachometer-alt text-info me-1"></i>${pet.stats?.speed}</span>
                             </div>
                         </div>
                     </div>
-                `;
-                grid.innerHTML += html;
+                </div>
+            `;
+            grid.innerHTML += html;
+        });
+
+        if (pets.length > 100) {
+            grid.innerHTML += '<div class="col-12 text-center text-muted mt-4">Showing first 100 results...</div>';
+        }
+    }
+
+    // --- Dynamic Search Parser ---
+
+    function applySearch() {
+        const query = document.getElementById('searchInput').value.trim();
+        if (!query) {
+            renderPets(allPets);
+            return;
+        }
+
+        try {
+            const filtered = allPets.filter(pet => evaluateQuery(pet, query));
+            renderPets(filtered);
+        } catch (e) {
+            console.error(e);
+            alert("Invalid search query!");
+        }
+    }
+
+    function evaluateQuery(pet, query) {
+        // 1. Normalize
+        let q = query.toLowerCase();
+
+        // 2. Replace operators
+        q = q.replace(/\s+and\s+/g, ' && ');
+        q = q.replace(/\s+or\s+/g, ' || ');
+        q = q.replace(/\s+not\s+/g, ' ! ');
+
+        // 3. Handle fields logic
+        const orBlocks = q.split(' || ');
+        return orBlocks.some(orBlock => {
+            const andBlocks = orBlock.split(' && ');
+            return andBlocks.every(condition => {
+                return evaluateCondition(pet, condition.trim());
             });
+        });
+    }
 
-            if (pets.length > 100) {
-                grid.innerHTML += '<div class="col-12 text-center text-muted mt-3">Showing first 100 results...</div>';
-            }
+    function evaluateCondition(pet, condition) {
+        // Handle NOT
+        if (condition.startsWith('! ') || condition.startsWith('not ')) {
+            return !evaluateCondition(pet, condition.replace(/^(!|not)\s+/, ''));
         }
 
-        // --- Dynamic Search Parser ---
+        // Parse: field op value
+        const parts = condition.match(/^(\w+)\s*(=|!=|>|<|>=|<=|contains)\s*(.+)$/);
+        if (!parts) return true;
 
-        function applySearch() {
-            const query = document.getElementById('searchInput').value.trim();
-            if (!query) {
-                renderPets(allPets);
-                return;
-            }
+        const field = parts[1];
+        const op = parts[2];
+        let val = parts[3].replace(/['"]/g, ''); // Remove quotes
 
-            try {
-                const filtered = allPets.filter(pet => evaluateQuery(pet, query));
-                renderPets(filtered);
-            } catch (e) {
-                console.error(e);
-                alert("Invalid search query!");
-            }
+        // Get pet value
+        let petVal;
+        if (field === 'name') petVal = pet.name.toLowerCase();
+        else if (field === 'level') petVal = pet.level;
+        else if (field === 'quality') petVal = pet.quality;
+        else if (['health', 'power', 'speed'].includes(field)) petVal = pet.stats?.[field] || 0;
+        else return false; // Unknown field
+
+        // Compare
+        if (field !== 'name') {
+            val = parseFloat(val);
+            petVal = parseFloat(petVal);
         }
 
-        function evaluateQuery(pet, query) {
-            // Tokenize: Split by spaces but keep quoted strings together? 
-            // Simple approach: Replace operators with JS equivalents and eval() (Safe-ish for client-side only data)
-            // Ideally write a proper parser, but for this scope, let's do a smart replace.
-
-            // 1. Normalize
-            let q = query.toLowerCase();
-
-            // 2. Replace operators
-            q = q.replace(/\s+and\s+/g, ' && ');
-            q = q.replace(/\s+or\s+/g, ' || ');
-            q = q.replace(/\s+not\s+/g, ' ! ');
-
-            // 3. Handle fields
-            // We need to replace 'level' with 'pet.level', etc.
-            // But we must be careful not to replace inside strings.
-
-            // Helper to get value
-            const getVal = (field) => {
-                if (field === 'name') return `'${pet.name.toLowerCase().replace(/'/g, "")}'`;
-                if (field === 'level') return pet.level;
-                if (field === 'quality') return pet.quality;
-                if (field === 'health') return pet.stats?.health || 0;
-                if (field === 'power') return pet.stats?.power || 0;
-                if (field === 'speed') return pet.stats?.speed || 0;
-                return 0;
-            };
-
-            // Regex to find conditions: (field) (op) (value)
-            // e.g. level > 20
-            // e.g. name contains "dragon"
-
-            // We will manually parse the boolean logic by splitting by && and ||
-            // This is getting complex for a regex replace.
-
-            // Alternative: Recursive Descent Parser or simple split.
-            // Let's try a simpler approach: 
-            // Split by OR, then by AND.
-
-            // Note: This simple parser doesn't support parentheses nesting for mixed AND/OR without strict precedence.
-            // It assumes OR has lower precedence (split by OR first).
-
-            const orBlocks = q.split(' || ');
-            return orBlocks.some(orBlock => {
-                const andBlocks = orBlock.split(' && ');
-                return andBlocks.every(condition => {
-                    return evaluateCondition(pet, condition.trim());
-                });
-            });
+        switch (op) {
+            case '=': return petVal == val;
+            case '!=': return petVal != val;
+            case '>': return petVal > val;
+            case '<': return petVal < val;
+            case '>=': return petVal >= val;
+            case '<=': return petVal <= val;
+            case 'contains': return String(petVal).includes(String(val));
+            default: return false;
         }
+    }
 
-        function evaluateCondition(pet, condition) {
-            // Handle NOT
-            if (condition.startsWith('! ') || condition.startsWith('not ')) {
-                return !evaluateCondition(pet, condition.replace(/^(!|not)\s+/, ''));
-            }
-
-            // Parse: field op value
-            // Operators: >, <, >=, <=, =, !=, contains
-            const parts = condition.match(/^(\w+)\s*(=|!=|>|<|>=|<=|contains)\s*(.+)$/);
-            if (!parts) return true; // Invalid condition ignored? or false?
-
-            const field = parts[1];
-            const op = parts[2];
-            let val = parts[3].replace(/['"]/g, ''); // Remove quotes
-
-            // Get pet value
-            let petVal;
-            if (field === 'name') petVal = pet.name.toLowerCase();
-            else if (field === 'level') petVal = pet.level;
-            else if (field === 'quality') petVal = pet.quality;
-            else if (['health', 'power', 'speed'].includes(field)) petVal = pet.stats?.[field] || 0;
-            else return false; // Unknown field
-
-            // Compare
-            if (field !== 'name') {
-                val = parseFloat(val);
-                petVal = parseFloat(petVal);
-            }
-
-            switch (op) {
-                case '=': return petVal == val;
-                case '!=': return petVal != val;
-                case '>': return petVal > val;
-                case '<': return petVal < val;
-                case '>=': return petVal >= val;
-                case '<=': return petVal <= val;
-                case 'contains': return String(petVal).includes(String(val));
-                default: return false;
-            }
-        }
-
-        // Init
-        loadPets();
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-
-</html>
+    // Init
+    loadPets();
+</script>
+{% endblock %}
