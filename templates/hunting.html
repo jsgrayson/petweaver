@@ -36,16 +36,53 @@
             .then(data => {
                 const container = document.getElementById('missing-pets');
 
-                if (data.length === 0) {
-                    container.innerHTML = `
-                        <div class="card bg-dark border-success">
-                            <div class="card-body text-center py-5">
-                                <i class="fas fa-check-circle fa-4x text-success mb-3"></i>
-                                <h2 class="text-success">Collection Complete!</h2>
-                                <p class="text-white">You have all the pets required for your current strategies.</p>
+                if (data.length === 0 || (data.error && data.error.includes("empty"))) {
+                    // Fetch some stats to show
+                    Promise.all([
+                        fetch('/api/status').then(r => r.json()),
+                        fetch('/api/collection/all').then(r => r.json())
+                    ]).then(([status, collection]) => {
+                        container.innerHTML = `
+                            <div class="card glass-card border-success">
+                                <div class="card-body text-center py-5">
+                                    <i class="fas fa-check-circle fa-4x text-success mb-3"></i>
+                                    <h2 class="text-success">Collection Complete!</h2>
+                                    <p class="text-white mb-4">You have all the key pets for your loaded strategies.</p>
+                                    <div class="row text-center mb-4">
+                                        <div class="col-md-4">
+                                            <div class="stat-card">
+                                                <div class="stat-value">${status.stats.pets || collection.length}</div>
+                                                <div class="stat-label">Pets Owned</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="stat-card">
+                                                <div class="stat-value">${status.stats.strategies || 0}</div>
+                                                <div class="stat-label">Strategies</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="stat-card">
+                                                <div class="stat-value" style="color: #00ff88;">100%</div>
+                                                <div class="stat-label">Coverage</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">Tip: Import more strategies to discover new pets to collect</small>
+                                </div>
                             </div>
-                        </div>
-                    `;
+                        `;
+                    }).catch(() => {
+                        container.innerHTML = `
+                            <div class="card glass-card border-success">
+                                <div class="card-body text-center py-5">
+                                    <i class="fas fa-check-circle fa-4x text-success mb-3"></i>
+                                    <h2 class="text-success">All Clear!</h2>
+                                    <p class="text-white">No missing pets for your current strategies.</p>
+                                </div>
+                            </div>
+                        `;
+                    });
                     return;
                 }
 

@@ -58,3 +58,29 @@ SafariHatFrame:SetScript("OnEvent", function(self, event)
         C_Timer.After(3, CheckSquirtDay) -- Check 3 seconds after login
     end
 end)
+
+-- Co-Pilot: Audio Feedback
+local CoPilotFrame = CreateFrame("Frame")
+CoPilotFrame:RegisterEvent("PET_BATTLE_OVER")
+CoPilotFrame:RegisterEvent("PET_BATTLE_TURN_STARTED")
+
+CoPilotFrame:SetScript("OnEvent", function(self, event, winner)
+    if event == "PET_BATTLE_OVER" then
+        if winner == 1 then -- Player Won
+            PlaySoundFile("Sound\\Interface\\RaidWarning.ogg") -- Victory Sound
+            print("|cff00ff00[PetWeaver]|r 🏆 Battle Won!")
+        end
+    elseif event == "PET_BATTLE_TURN_STARTED" then
+        -- Check if swap is recommended (Placeholder logic)
+        -- In a real implementation, this would check the strategy engine
+        local activePetIndex = C_PetBattles.GetActivePet(1)
+        local health = C_PetBattles.GetHealth(1, activePetIndex)
+        local maxHealth = C_PetBattles.GetMaxHealth(1, activePetIndex)
+        
+        if health and maxHealth and (health / maxHealth) < 0.1 and health > 0 then
+            -- Low health warning (Swap might be needed)
+            PlaySoundFile("Sound\\Interface\\ReadyCheck.ogg") -- Alert Sound
+            print("|cffff0000[PetWeaver]|r ⚠️ Low Health! Consider Swapping.")
+        end
+    end
+end)

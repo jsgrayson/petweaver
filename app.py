@@ -7,6 +7,7 @@ from datetime import datetime
 import automate
 import requests
 from simulator.strategy_manager import StrategyManager
+import db_helper  # SQL database queries
 
 # Load .env manually
 if os.path.exists('.env'):
@@ -51,33 +52,63 @@ goblin_integrator.start()
 # ... (existing code) ...
 
 @app.route('/api/wishlist', methods=['GET', 'POST', 'DELETE'])
-def handle_wishlist():
-    if request.method == 'GET':
-        return jsonify(wishlist_manager.get_wishlist())
-    
-    data = request.json
-    if request.method == 'POST':
-        success, msg = wishlist_manager.add_item(
-            data.get('speciesId'),
-            data.get('petName'),
-            data.get('breedId'),
-            data.get('breedName')
-        )
-        return jsonify({"status": "success" if success else "error", "message": msg})
-        
-    if request.method == 'DELETE':
-        success = wishlist_manager.remove_item(data.get('speciesId'), data.get('breedId'))
-        return jsonify({"status": "success" if success else "error"})
+def manage_wishlist():
+    """Manage wishlist using SQL"""
+    try:
+        if request.method == 'GET':
+            wishlist = db_helper.get_wishlist()
+            return jsonify(wishlist)
+            
+        elif request.method == 'POST':
+            data = request.json
+            success = db_helper.add_to_wishlist(
+                species_id=data.get('speciesId'),
+                pet_name=data.get('petName'),
+                breed_id=data.get('breedId'),
+                breed_name=data.get('breedName')
+            )
+            return jsonify({"success": success})
+            
+        elif request.method == 'DELETE':
+            data = request.json
+            success = db_helper.remove_from_wishlist(
+                species_id=data.get('speciesId')
+            )
+            return jsonify({"success": success})
+            
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/scan_wild_pet', methods=['POST'])
 def scan_wild_pet():
     data = request.json
-    match, item = wishlist_manager.check_match(data.get('speciesId'), data.get('breedId'))
+    species_id = data.get('speciesId')
+    breed_id = data.get('breedId')
+    rarity = data.get('rarity', 'COMMON')
+    
+    # Check Wishlist
+    match, item = wishlist_manager.check_match(species_id, breed_id)
     if match:
         return jsonify({
             "alert": True, 
             "message": f"Found {item['petName']} ({item['breedName']})!"
         })
+        
+    # Check Wild Monitor (Strategies/Mythicals)
+    if species_id:
+        monitor_alert = wild_monitor.check_wild_pet(int(species_id), rarity)
+        if monitor_alert['alert']:
+            return jsonify(monitor_alert)
+            
+    return jsonify({"alert": False})
+
+@app.route('/api/alerts/active')
+def get_active_alert():
+    """Get current active alert for UI polling"""
+    if wild_monitor.current_alert:
+        # Only show alerts from last 15 seconds
+        if time.time() - wild_monitor.current_alert.get('timestamp', 0) < 15:
+            return jsonify(wild_monitor.current_alert)
     return jsonify({"alert": False})
 
 @app.route('/wishlist')
@@ -162,57 +193,35 @@ def log_combat_result():
         return jsonify({"status": "success"})
     return jsonify({"status": "error", "message": "Missing result"}), 400
 
-@app.route('/api/combat/history', methods=['GET'])
-def get_combat_history():
-    limit = int(request.args.get('limit', 50))
-    return jsonify(combat_manager.get_history(limit))
-
-@app.route('/api/combat/stats', methods=['GET'])
-def get_combat_stats():
-    return jsonify(combat_manager.get_stats())
 
 @app.route('/combat')
 def combat_page():
     return render_template('combat_log.html')
 
 # Duplicate Consolidation API
-@app.route('/api/collection/duplicates', methods=['GET'])
+@app.route('/get-duplicates')
 def get_duplicates():
-    if not os.path.exists('my_pets.json'):
-        return jsonify([])
-        
+    """Get duplicate pets using fast SQL query"""
     try:
-        with open('my_pets.json', 'r') as f:
-            data = json.load(f)
-            pets = data.get('pets', [])
-            
-        # Group by Species ID
-        groups = {}
-        for pet in pets:
-            sid = pet.get('speciesId')
-            if sid not in groups:
-                groups[sid] = []
-            groups[sid].append(pet)
-            
-        # Filter for duplicates
-        duplicates = []
-        for sid, group in groups.items():
-            if len(group) > 1:
-                # Sort by Level (desc), then Quality (desc) to help identify best
-                group.sort(key=lambda x: (x.get('level', 0), x.get('quality', 0)), reverse=True)
-                duplicates.append({
-                    "speciesId": sid,
-                    "petName": group[0].get('name', 'Unknown'), # Use name from first pet
-                    "count": len(group),
-                    "pets": group
-                })
-                
-        # Sort by count (desc)
-        duplicates.sort(key=lambda x: x['count'], reverse=True)
-        return jsonify(duplicates)
+        import db_helper
+        duplicates = db_helper.get_duplicates()
+        
+        # Format for frontend compatibility
+        result = []
+        for dup in duplicates:
+            result.append({
+                'speciesId': dup['species_id'],
+                'name': dup['name'],
+                'count': dup['count'],
+                'bestQuality': dup['best_quality'],
+                'bestLevel': dup['best_level']
+            })
+        
+        return jsonify(result)
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Error loading duplicates: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/duplicates')
 def duplicates_page():
@@ -221,12 +230,10 @@ def duplicates_page():
 # Collection Viewer API
 @app.route('/api/collection/all', methods=['GET'])
 def get_all_pets():
-    if not os.path.exists('my_pets.json'):
-        return jsonify([])
+    """Get all pets using fast SQL query"""
     try:
-        with open('my_pets.json', 'r') as f:
-            data = json.load(f)
-            return jsonify(data.get('pets', []))
+        pets = db_helper.get_all_pets(limit=2000)  # Get all pets
+        return jsonify(pets)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -234,9 +241,48 @@ def get_all_pets():
 def collection_page():
     return render_template('collection.html')
 
-# --- Smart Queue API ---
+# Initialize Managers
 from simulator.queue_manager import QueueManager
-queue_manager = QueueManager({}, {}) # Initialize with empty DBs for now, or pass loaded ones
+queue_manager = QueueManager(species_db={}, ability_db={}) # Data loaded internally
+
+from simulator.wild_monitor import WildPetMonitor
+wild_monitor = WildPetMonitor()
+
+# --- DOJO ENGINE (Self-Play) ---
+from dojo_engine import DojoEngine
+dojo_engine = DojoEngine()
+
+@app.route('/api/dojo/start', methods=['POST'])
+def start_dojo():
+    """Start a Dojo training session"""
+    data = request.json
+    generations = data.get('generations', 10)
+    
+    def run_dojo():
+        dojo_engine.is_running = True
+        dojo_engine.initialize_population()
+        for _ in range(generations):
+            if not dojo_engine.is_running: break
+            dojo_engine.run_generation()
+        dojo_engine.is_running = False
+        
+    thread = threading.Thread(target=run_dojo)
+    thread.start()
+    return jsonify({"message": "Dojo started"})
+
+@app.route('/api/dojo/stop', methods=['POST'])
+def stop_dojo():
+    dojo_engine.is_running = False
+    return jsonify({"message": "Dojo stopping..."})
+
+@app.route('/api/dojo/status')
+def dojo_status():
+    return jsonify(dojo_engine.get_status())
+
+@app.route('/dojo')
+def dojo_page():
+    return render_template('dojo.html')
+
 
 @app.route('/api/queue/next', methods=['POST'])
 def get_next_queue_team():
@@ -244,23 +290,30 @@ def get_next_queue_team():
     leveling_pet = data.get('leveling_pet')
     target_id = data.get('target_id')
     
-    # Mock target encounter lookup (replace with real DB lookup)
-    target_encounter = encounters.get(target_id, {'npc_pets': [{'family': 'Beast'}, {'family': 'Flying'}]})
+    if not leveling_pet or not target_id:
+        return jsonify({"error": "Missing leveling_pet or target_id"}), 400
     
-    team = queue_manager.get_optimal_carry_team(leveling_pet, target_encounter)
+    team = queue_manager.get_optimal_carry_team(leveling_pet, target_id)
     return jsonify(team)
 
 @app.route('/api/queue/result', methods=['POST'])
 def report_queue_result():
     data = request.json
-    # data: { win: bool, hp_remaining: int }
     queue_manager.record_result(data)
-    efficiency = queue_manager.calculate_bandage_efficiency()
-    return jsonify({"status": "success", "efficiency": efficiency})
+    return jsonify({"efficiency": queue_manager.calculate_bandage_efficiency()})
 
-@app.route('/queue')
-def queue_page():
-    return render_template('queue.html')
+@app.route('/api/alerts/wild', methods=['POST'])
+def check_wild_alert():
+    """Check if a wild pet seen in-game triggers an alert"""
+    data = request.json
+    pet_id = data.get('pet_id')
+    rarity = data.get('rarity', 'COMMON')
+    
+    if not pet_id:
+        return jsonify({"error": "Missing pet_id"}), 400
+        
+    alert = wild_monitor.check_wild_pet(int(pet_id), rarity)
+    return jsonify(alert)
 
 def get_blizzard_client():
     """Returns a requests session with authentication headers, refreshing token if needed"""
@@ -326,53 +379,6 @@ def update_stats():
     except Exception as e:
         print(f"Error updating stats: {e}")
 
-# Wishlist System
-WISHLIST_FILE = 'wishlist.json'
-
-def load_wishlist():
-    if os.path.exists(WISHLIST_FILE):
-        try:
-            with open(WISHLIST_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_wishlist(data):
-    with open(WISHLIST_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
-
-@app.route('/api/wishlist', methods=['GET', 'POST', 'DELETE'])
-def manage_wishlist():
-    wishlist = load_wishlist()
-    
-    if request.method == 'GET':
-        return jsonify(wishlist)
-        
-    if request.method == 'POST':
-        data = request.json
-        # Check for duplicates
-        for item in wishlist:
-            if item['speciesId'] == data['speciesId'] and item['breedId'] == data['breedId']:
-                return jsonify({"status": "error", "message": "Item already in wishlist"}), 400
-                
-        wishlist.append({
-            "speciesId": data['speciesId'],
-            "petName": data.get('petName', 'Unknown'),
-            "breedId": data['breedId'],
-            "breedName": data.get('breedName', 'Unknown'), # e.g. P/P
-            "addedAt": datetime.now().isoformat()
-        })
-        save_wishlist(wishlist)
-        return jsonify({"status": "success", "wishlist": wishlist})
-        
-    if request.method == 'DELETE':
-        data = request.json
-        wishlist = [item for item in wishlist if not (
-            item['speciesId'] == data['speciesId'] and item['breedId'] == data['breedId']
-        )]
-        save_wishlist(wishlist)
-        return jsonify({"status": "success", "wishlist": wishlist})
 
 
 def run_automation_thread(skip_fetch, force_scrape, addon_path):
@@ -471,7 +477,15 @@ def index():
 
 @app.route('/api/status')
 def get_status():
-    return jsonify(state)
+    """Get status with real-time SQL stats"""
+    try:
+        stats = db_helper.get_collection_stats()
+        return jsonify({
+            **state,
+            "stats": stats
+        })
+    except Exception as e:
+        return jsonify({**state, "stats_error": str(e)})
 
 @app.route('/api/run', methods=['POST'])
 def run_automation():
@@ -1140,21 +1154,23 @@ def run_evolution_thread(target_name, pop_size, generations, my_pets_only=True, 
 def test_page():
     return render_template('test.html')
 
+@app.route('/api/hunting/missing')
+def get_missing_pets():
+    """Get important missing pets using SQL"""
+    try:
+        missing = db_helper.get_missing_pets(limit=50)
+        return jsonify(missing)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/encounters')
 def get_encounters():
-    """
-    Serve encounters from encounters_complete.json
-    """
+    """Get all encounters using SQL"""
     try:
-        if os.path.exists('encounters_complete.json'):
-            with open('encounters_complete.json', 'r') as f:
-                encounters = json.load(f)
-            return jsonify(encounters)
-        else:
-            return jsonify({'error': 'encounters_complete.json not found'}), 404
-    
+        encounters = db_helper.get_all_encounters()
+        return jsonify(encounters)
     except Exception as e:
-        return jsonify({'error': f'Failed to load encounters: {str(e)}'}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/genetic')
@@ -1276,6 +1292,24 @@ def get_protected_pets():
         print(f"Error generating protected list: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/analytics')
+def get_analytics():
+    """Get analytics using fast SQL queries"""
+    try:
+        # Get collection stats from SQL
+        stats = db_helper.get_collection_stats()
+        
+        # Get duplicates from SQL
+        duplicates = db_helper.get_duplicates()
+        
+        return jsonify({
+            'collection_stats': stats,
+            'duplicates': len(duplicates),
+            'duplicate_details': duplicates[:10]  # Top 10 duplicates
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/maintenance/fetch-species')
 def trigger_species_fetch():
     """Fetch species data from Blizzard API to populate family info"""
@@ -1352,136 +1386,19 @@ def trigger_species_fetch():
 
 @app.route('/api/analytics/collection-health')
 def get_collection_health():
-    """Analyze pet collection for strategic gaps and coverage"""
+    """Analyze pet collection for strategic gaps and coverage using SQL"""
     try:
-        # Pet family mapping
-        families = {
-            1: "Humanoid", 2: "Dragonkin", 3: "Flying", 4: "Undead",
-            5: "Critter", 6: "Magic", 7: "Elemental", 8: "Beast",
-            9: "Aquatic", 10: "Mechanical"
-        }
+        family_stats = db_helper.get_collection_health_stats()
         
-        # Load species cache
-        species_cache = {}
-        if os.path.exists('species_data.json'):
-            with open('species_data.json', 'r') as f:
-                species_cache = json.load(f)
-        
-        # Initialize coverage tracking
-        family_coverage = {name: {"owned": 0, "needed": 0, "missing_roles": []} for name in families.values()}
-        strategic_value = {}  # pet_id -> number of strategies it unlocks
-        
-        # Load data
-        owned_pets = {}
-        if os.path.exists('my_pets.json'):
-            with open('my_pets.json', 'r') as f:
-                pets_data = json.load(f)
-                for pet in pets_data.get('pets', []):
-                    # Safe access
-                    species = pet.get('species', {})
-                    if not species: continue
-                    
-                    pet_id = species.get('id')
-                    pet_name = species.get('name', 'Unknown')
-                    if isinstance(pet_name, dict):
-                        pet_name = pet_name.get('en_US', 'Unknown')
-                    
-                    # Try to get family from cache first, then stats
-                    family_id = None
-                    if str(pet_id) in species_cache:
-                        family_id = species_cache[str(pet_id)].get('family_id')
-                    
-                    if not family_id:
-                        family_id = pet.get('stats', {}).get('pet_type_id')
-                    
-                    owned_pets[pet_name] = {
-                        'family_id': family_id,
-                        'level': pet.get('level', 1),
-                        'quality': pet.get('quality', {}).get('name', 'Unknown')
-                    }
-                    
-                    # Count owned by family
-                    if family_id in families:
-                        family_coverage[families[family_id]]["owned"] += 1
-        
-        # Analyze strategies to find needed pets
-        if os.path.exists('strategies_enhanced.json'):
-            with open('strategies_enhanced.json', 'r') as f:
-                strategies_data = json.load(f)
-                
-                # Iterate through expansions and categories
-                for expansion, categories in strategies_data.items():
-                    for category, encounters in categories.items():
-                        for encounter in encounters:
-                            for strategy in encounter.get('strategies', []):
-                                for slot in strategy.get('pet_slots', []):
-                                    for pet_option in slot:
-                                        pet_name = pet_option.get('name', 'Unknown')
-                                        pet_id = pet_option.get('id')
-                                        
-                                        # Track strategic value
-                                        if pet_id and pet_id != 0 and str(pet_id) != "0":
-                                            # Filter out numeric names (often placeholders like "1", "2")
-                                            if pet_name.isdigit():
-                                                continue
-                                            
-                                            # Filter out unattainable pets
-                                            unattainable_pets = {118572, 79792, 128494, 115589}
-                                            if pet_id in unattainable_pets:
-                                                continue
-                                                
-                                            if pet_id not in strategic_value:
-                                                strategic_value[pet_id] = {"name": pet_name, "unlocks": 0}
-                                            
-                                            if pet_name not in owned_pets:
-                                                strategic_value[pet_id]["unlocks"] += 1
-        
-        
-        # Helper to build WarcraftPets URL
-        def get_warcraftpets_url(pet_id, pet_name):
-            family_map = {
-                1: "humanoid", 2: "dragonkin", 3: "flying", 4: "undead",
-                5: "critter", 6: "magic", 7: "elemental", 8: "beast",
-                9: "aquatic", 10: "mechanical"
-            }
-            rarity_slug = "rare"
-            name_slug = pet_name.lower().replace("'", "").replace(" ", "-").replace(":", "")
-            name_slug = ''.join(c for c in name_slug if c.isalnum() or c == '-')
-            family_slug = family_map.get(pet_id, "battle")
-            return f"https://www.warcraftpets.com/wow-pets/{family_slug}/{rarity_slug}/{name_slug}/"
-
-        # Find high-value missing pets with URLs
-        missing_high_value = sorted(
-            [{"id": pid, "name": data["name"], "unlocks": data["unlocks"], "warcraftpets_url": get_warcraftpets_url(pid, data["name"])} 
-             for pid, data in strategic_value.items() if data["unlocks"] > 0],
-            key=lambda x: x["unlocks"],
-            reverse=True
-        )[:10]
-        
-        # Calculate overall health score (0-100)
-        total_families = len(families)
-        families_with_pets = sum(1 for f in family_coverage.values() if f["owned"] > 0)
-        diversity_score = (families_with_pets / total_families) * 100
-        
-        # Calculate completeness (based on strategic needs)
-        total_strategic_pets = len(strategic_value)
-        owned_strategic_pets = sum(1 for pet_id, data in strategic_value.items() if data["unlocks"] == 0)
-        completeness_score = (owned_strategic_pets / total_strategic_pets * 100) if total_strategic_pets > 0 else 100
-        
-        overall_score = (diversity_score * 0.3 + completeness_score * 0.7)
+        # Calculate overall health score
+        total_coverage = sum(f['coverage_pct'] for f in family_stats.values()) / len(family_stats) if family_stats else 0
         
         return jsonify({
-            "overall_score": round(overall_score, 1),
-            "diversity_score": round(diversity_score, 1),
-            "completeness_score": round(completeness_score, 1),
-            "family_coverage": family_coverage,
-            "missing_high_value": missing_high_value,
-            "total_owned": len(owned_pets),
-            "total_unique_species": len(strategic_value)
+            "health_score": round(total_coverage, 1),
+            "family_coverage": family_stats,
+            "gap_analysis": [] # TODO: Implement gap analysis in SQL later
         })
-        
     except Exception as e:
-        print(f"Error in collection health: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/leveling')
@@ -1512,317 +1429,29 @@ def get_progress():
     # For now, return mock data or empty structure
     return jsonify(progress)
 
+@app.route('/api/combat/history', methods=['GET'])
+def get_combat_history():
+    """Get combat history using SQL"""
+    try:
+        logs = db_helper.get_combat_logs(limit=100)
+        return jsonify(logs)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/recommendations')
 def get_recommendations():
-    """Get smart "Do These Next" recommendations"""
+    """Get smart recommendations for next activities using SQL"""
     try:
-        recommendations = []
-        
-        # Load ready strategies
-        if os.path.exists('my_ready_strategies.json'):
-            with open('my_ready_strategies.json', 'r') as f:
-                data = json.load(f)
-                
-                # Prioritize by various factors
-                for exp_name, expansions in data.items():
-                    for cat_name, encounters in expansions.items():
-                        for encounter in encounters:
-                            # Score based on: expansion recency, category value
-                            score = 0
-                            if "War Within" in exp_name or "Dragonflight" in exp_name:
-                                score += 10
-                            if "World Quest" in cat_name:
-                                score += 5
-                            
-                            recommendations.append({
-                                "name": encounter.get('encounter_name', 'Unknown'),
-                                "expansion": exp_name,
-                                "category": cat_name,
-                                "score": score,
-                                "reason": f"High priority {cat_name} in {exp_name}"
-                            })
-                
-                # Sort by score and take top 10
-                recommendations.sort(key=lambda x: x['score'], reverse=True)
-                recommendations = recommendations[:10]
-        
+        recommendations = db_helper.get_recommendations(limit=10)
         return jsonify(recommendations)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/strategies/all')
 def get_all_strategies():
-    """Get all strategies for browsing"""
     try:
-        if os.path.exists('my_ready_strategies.json'):
-            with open('my_ready_strategies.json', 'r') as f:
-                data = json.load(f)
-                
-                # Flatten for easier browsing
-                all_strategies = []
-                for exp_name, expansions in data.items():
-                    for cat_name, encounters in expansions.items():
-                        for encounter in encounters:
-                            all_strategies.append({
-                                "name": encounter.get('encounter_name', 'Unknown'),
-                                "expansion": exp_name,
-                                "category": cat_name,
-                                "teams": encounter.get('strategies', [])
-                            })
-                
-                return jsonify(all_strategies)
-        
-        return jsonify([])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/hunting/missing')
-def get_missing_pets():
-    """Get list of missing pets needed for ready strategies"""
-    try:
-        missing_pets = {}
-        
-        # WarcraftPets URL builder
-        def get_warcraftpets_url(pet_id, pet_name):
-            # Pet family mapping (pet_type_id -> URL slug)
-            family_map = {
-                1: "humanoid", 2: "dragonkin", 3: "flying", 4: "undead",
-                5: "critter", 6: "magic", 7: "elemental", 8: "beast",
-                9: "aquatic", 10: "mechanical"
-            }
-            
-            # Rarity tier mapping (approximate - using common pets as "common", most as "uncommon/rare")
-            # Since we don't have rarity in strategies data, we'll default to "rare" as most battle pets are
-            rarity_slug = "rare"  # Default to rare as it's most common for battle pets
-            
-            # For specific known pets, override rarity
-            mythical_pets = {150381, 150385, 154832}  # Known mythical/special pets
-            if pet_id in mythical_pets:
-                rarity_slug = "mythical"
-            
-            # Get family slug (default to "battle" if unknown)
-            # We'll need to look this up from the pet data
-            family_slug = "battle"  # Default fallback
-            
-            # Try to get family from my_pets.json if available
-            if os.path.exists('my_pets.json'):
-                try:
-                    with open('my_pets.json', 'r') as f:
-                        pets_data = json.load(f)
-                        for pet in pets_data.get('pets', []):
-                            if pet.get('species', {}).get('id') == pet_id:
-                                family_id = pet.get('stats', {}).get('pet_type_id')
-                                if family_id in family_map:
-                                    family_slug = family_map[family_id]
-                                break
-                except: pass
-            
-            # Also check strategies_enhanced.json for family hints
-            if family_slug == "battle" and os.path.exists('strategies_enhanced.json'):
-                # family_slug will stay as fallback if not found
-                pass
-            
-            # Build name slug
-            name_slug = pet_name.lower().replace("'", "").replace(" ", "-").replace(":", "")
-            name_slug = ''.join(c for c in name_slug if c.isalnum() or c == '-')
-            
-            return f"https://www.warcraftpets.com/wow-pets/{family_slug}/{rarity_slug}/{name_slug}/"
-        
-        
-        # Pet location database (ID -> Location Info)
-        pet_locations = {
-            115146: {"zone": "Maldraxxus", "source": "Wild Battle", "coords": "Various locations"},
-            86447: {"zone": "Spires of Arak", "source": "Wild Battle", "coords": "Throughout zone"},
-            143564: {"zone": "Drustvar", "source": "Wild Battle", "coords": "Throughout zone"},
-            55367: {"zone": "Darkmoon Faire", "source": "Vendor (Lhara)", "coords": "Darkmoon Island"},
-            64899: {"zone": "Vale of Eternal Blossoms", "source": "Wild Battle", "coords": "Throughout zone"},
-            68819: {"zone": "Timeless Isle", "source": "Wild Battle", "coords": "Various locations"},
-            68820: {"zone": "Dread Wastes", "source": "Wild Battle", "coords": "Throughout zone"},
-            116155: {"zone": "Un'Goro Crater", "source": "Vendor", "coords": "Marshal's Stand"},
-            39896: {"zone": "Deepholm", "source": "Wild Battle", "coords": "Throughout zone"},
-            71033: {"zone": "Vale of Eternal Blossoms", "source": "Quest Reward", "coords": "Mogu'shan Palace"},
-            88134: {"zone": "Draenor", "source": "Engineering", "coords": "Crafted"},
-            143796: {"zone": "Drustvar", "source": "Vendor", "coords": "Arom's Stand"},
-            88577: {"zone": "Draenor", "source": "Archaeology", "coords": "Fossil Solve"},
-            97324: {"zone": "Tanaan Jungle", "source": "Drop (Bleeding Hollow)", "coords": "Zeth'Gol"},
-            154814: {"zone": "Nazjatar", "source": "Wild Battle", "coords": "Throughout zone"},
-            115148: {"zone": "Maldraxxus", "source": "Wild Battle", "coords": "Throughout zone"},
-            113440: {"zone": "Azsuna", "source": "World Quest", "coords": "Seabrine Coves"},
-            69748: {"zone": "Throne of Thunder", "source": "Drop (Sand Elementals)", "coords": "Raid"},
-            68846: {"zone": "Kun-Lai Summit", "source": "Wild Battle", "coords": "Throughout zone"},
-            68805: {"zone": "Feralas", "source": "Wild Battle", "coords": "Throughout zone"},
-            68654: {"zone": "Duskwood", "source": "Vendor", "coords": "Darkshire"},
-            172148: {"zone": "Mechagon", "source": "Drop", "coords": "Operation: Mechagon"},
-            61080: {"zone": "Various", "source": "Wild Battle", "coords": "Starting Zones"},
-            90206: {"zone": "Black Temple", "source": "Drop (Reliquary)", "coords": "Raid"},
-            68666: {"zone": "Molten Core", "source": "Drop (Golemagg)", "coords": "Raid"},
-            86081: {"zone": "Netherstorm", "source": "Wild Battle", "coords": "Throughout zone"},
-            25706: {"zone": "Mount Hyjal", "source": "Wild Battle", "coords": "Throughout zone"},
-            68664: {"zone": "Molten Core", "source": "Drop (Magmadar)", "coords": "Raid"},
-            32791: {"zone": "Noblegarden", "source": "Event Vendor", "coords": "Holiday Event"},
-            61366: {"zone": "Various", "source": "Wild Battle", "coords": "Starting Zones"},
-            54227: {"zone": "Darkmoon Faire", "source": "Achievement", "coords": "Darkmoon Island"},
-            62818: {"zone": "Grizzly Hills", "source": "Wild Battle", "coords": "Throughout zone"},
-            61081: {"zone": "Various", "source": "Wild Battle", "coords": "Starting Zones"},
-            61826: {"zone": "Western Plaguelands", "source": "Wild Battle", "coords": "Andorhal"},
-            90203: {"zone": "Black Temple", "source": "Drop (Reliquary)", "coords": "Raid"},
-            90204: {"zone": "Black Temple", "source": "Drop (Reliquary)", "coords": "Raid"},
-            127863: {"zone": "Stormheim", "source": "Wild Battle", "coords": "Throughout zone"},
-            127862: {"zone": "Silithus", "source": "Wild Battle", "coords": "Throughout zone"},
-            68467: {"zone": "Vale of Eternal Blossoms", "source": "Wild Battle", "coords": "Throughout zone"},
-            90212: {"zone": "Isle of Quel'Danas", "source": "Drop", "coords": "Sunwell Plateau"},
-            149205: {"zone": "Drustvar", "source": "Wild Battle", "coords": "Throughout zone"},
-            143041: {"zone": "Nazmir", "source": "Wild Battle", "coords": "Throughout zone"},
-            29726: {"zone": "Account", "source": "Promotion", "coords": "Merge Account"},
-            32595: {"zone": "Northrend", "source": "Reputation", "coords": "Kalu'ak"},
-            21010: {"zone": "Exodar", "source": "Vendor", "coords": "Crystal Hall"},
-            62050: {"zone": "Various", "source": "Wild Battle", "coords": "Starting Zones"},
-            65187: {"zone": "Dread Wastes", "source": "Wild Battle", "coords": "Throughout zone"},
-            90201: {"zone": "Black Temple", "source": "Drop (Supremus)", "coords": "Raid"},
-            62922: {"zone": "Deepholm", "source": "Wild Battle", "coords": "Throughout zone"},
-            62182: {"zone": "Deepholm", "source": "Wild Battle", "coords": "Throughout zone"},
-            62246: {"zone": "Darkshore", "source": "Wild Battle", "coords": "Throughout zone"},
-            98463: {"zone": "Class Hall", "source": "Order Hall", "coords": "Druid"},
-            71488: {"zone": "Hyjal", "source": "Vendor", "coords": "Guardians of Hyjal"},
-            154832: {"zone": "Nazjatar", "source": "Drop: Elderspawn Nalaada", "coords": "Unknown"},
-            46898: {"zone": "Profession", "source": "Enchanting (Horde)", "coords": "N/A"},
-            127850: {"zone": "Blackwing Descent", "source": "Drop: Omnotron Defense System", "coords": "Raid"},
-            96404: {"zone": "Profession", "source": "Enchanting", "coords": "N/A"},
-            62317: {"zone": "Felwood", "source": "Wild Pet (Shatter Scar Vale)", "coords": "39, 44"},
-            65313: {"zone": "Black Market Auction House", "source": "Auction", "coords": "N/A"},
-            173990: {"zone": "The Maw", "source": "Wild Pet", "coords": "Various"},
-            161921: {"zone": "Ny'alotha", "source": "Drop: Ra-den", "coords": "Raid"},
-            163646: {"zone": "Uldum", "source": "Quest: Shadowbarb Hatchling", "coords": "Ramkahen"},
-            179179: {"zone": "The Maw", "source": "Wild Pet", "coords": "Various"},
-            173850: {"zone": "Torghast", "source": "Drop: Decayspeaker", "coords": "Dungeon"},
-            128159: {"zone": "Argus (Eredath)", "source": "Drop: Ataxon", "coords": "Unknown"},
-            179166: {"zone": "Tazavesh", "source": "Drop: Postmaster", "coords": "Dungeon"},
-            154777: {"zone": "Mechagon", "source": "Wild Pet (Rare Spawn)", "coords": "Various"},
-            179239: {"zone": "Torghast", "source": "Drop: Adamant Vaults Bosses", "coords": "Dungeon"},
-            161946: {"zone": "Ny'alotha", "source": "Drop: N'Zoth", "coords": "Raid"},
-            29147: {"zone": "Dalaran (Northrend)", "source": "Vendor: Darahir", "coords": "Underbelly"},
-            15358: {"zone": "Unavailable", "source": "Collector's Edition (EU)", "coords": "N/A"},
-            88692: {"zone": "Shadowmoon Valley (Draenor)", "source": "Drop: Demidos", "coords": "Socrethar's Rise"},
-            175203: {"zone": "Unavailable", "source": "BlizzConline 2021", "coords": "N/A"},
-            154720: {"zone": "Nazjatar", "source": "Wild Pet", "coords": "Various"},
-            150381: {"zone": "Revendreth", "source": "Wild Pet", "coords": "Various"},
-            150385: {"zone": "Revendreth", "source": "Wild Pet", "coords": "Various"},
-            61703: {"zone": "Arathi Highlands", "source": "Wild Pet", "coords": "Various"},
-            182768: {"zone": "Zereth Mortis", "source": "Wild Pet", "coords": "Various"},
-            73352: {"zone": "Siege of Orgrimmar", "source": "Drop: Siegecrafter Blackfuse", "coords": "Raid"},
-            231454: {"zone": "Hallow's End", "source": "Event Drop", "coords": "N/A"},
-            208637: {"zone": "Dragonflight", "source": "Vendor/Reputation", "coords": "Unknown"},
-            97206: {"zone": "Val'sharah", "source": "Drop: Dreamweaver Cache", "coords": "N/A"},
-            143464: {"zone": "Nazmir", "source": "Wild Pet", "coords": "Various"},
-            115785: {"zone": "Stormheim", "source": "World Quest: Falcosaur Swarm", "coords": "N/A"},
-            154855: {"zone": "Mechagon", "source": "Crafting/Drop", "coords": "N/A"},
-            154856: {"zone": "Mechagon", "source": "Drop: HK-8 Aerial Oppression Unit", "coords": "Dungeon"},
-            115784: {"zone": "Highmountain", "source": "World Quest: Falcosaur Swarm", "coords": "N/A"},
-            128388: {"zone": "Antoran Wastes", "source": "Drop: Mother Rosula", "coords": "Unknown"},
-            51090: {"zone": "Hillsbrad Foothills", "source": "Quest: Lawn of the Dead", "coords": "Brazie's Farmstead"},
-            71033: {"zone": "Karazhan", "source": "Drop: Terestian Illhoof", "coords": "Raid"},
-            143197: {"zone": "Vol'dun", "source": "Drop: Jenafur (Secret)", "coords": "Unknown"},
-            9662: {"zone": "Feralas", "source": "Drop: Sprite Darter Egg", "coords": "Unknown"},
-            67319: {"zone": "Darkmoon Island", "source": "Vendor: Lhara", "coords": "Darkmoon Faire"},
-            96405: {"zone": "Profession", "source": "Enchanting", "coords": "N/A"},
-            62555: {"zone": "Hellfire Peninsula", "source": "Wild Pet", "coords": "Various"},
-            128137: {"zone": "Argus", "source": "Wild Pet", "coords": "Various"},
-            183772: {"zone": "Torghast", "source": "Drop", "coords": "Dungeon"},
-            106232: {"zone": "Azsuna", "source": "Vendor/Reputation", "coords": "Unknown"},
-            28883: {"zone": "Icecrown", "source": "Collector's Edition (WotLK)", "coords": "N/A"},
-            171242: {"zone": "Drustvar", "source": "Wild Pet", "coords": "Various"},
-            143798: {"zone": "Nazjatar", "source": "Wild Pet", "coords": "Various"},
-            73542: {"zone": "Timeless Isle", "source": "Wild Pet", "coords": "Various"},
-            62669: {"zone": "Howling Fjord", "source": "Wild Pet", "coords": "Various"}
-        }
-        
-        if os.path.exists('my_ready_strategies.json') and os.path.exists('my_pets.json'):
-            # Load user's current pets and map by name (since IDs might mismatch between Species/NPC)
-            with open('my_pets.json', 'r') as f:
-                pet_data = json.load(f)
-                owned_names = set()
-                for pet in pet_data.get('pets', []):
-                    if 'species' in pet and 'name' in pet['species']:
-                        # Handle localized names
-                        name_data = pet['species']['name']
-                        if isinstance(name_data, dict):
-                            name = name_data.get('en_US')
-                        else:
-                            name = name_data
-                        if name:
-                            owned_names.add(name)
-            
-            # Load strategies to see which pets are needed
-            # Use strategies_enhanced.json for the full list of strategies (including those we don't have pets for)
-            strategy_file = 'strategies_enhanced.json' if os.path.exists('strategies_enhanced.json') else 'my_ready_strategies.json'
-            
-            with open(strategy_file, 'r') as f:
-                data = json.load(f)
-                
-                for exp_name, expansions in data.items():
-                    if not isinstance(expansions, dict): continue
-                    for cat_name, encounters in expansions.items():
-                        for encounter in encounters:
-                            for strategy in encounter.get('strategies', []):
-                                for slot in strategy.get('pet_slots', []):
-                                    if not slot: continue
-                                    
-                                    # Check if we own ANY pet in this slot (alternatives)
-                                    slot_filled = False
-                                    for option in slot:
-                                        opt_name = option.get('name', 'Unknown')
-                                        if opt_name in owned_names:
-                                            slot_filled = True
-                                            break
-                                    
-                                    if slot_filled:
-                                        continue
-                                        
-                                    # If slot is not filled, find the first available pet to hunt
-                                    target_pet = None
-                                    for option in slot:
-                                        pid = int(option.get('id', 0))
-                                        pname = option.get('name', 'Unknown')
-                                        
-                                        # Skip invalid
-                                        if pid == 0 or pname.isdigit(): continue
-                                        
-                                        # Check if unavailable/unattainable
-                                        is_unattainable = pid in {118572, 79792, 128494, 115589}
-                                        loc_info = pet_locations.get(pid)
-                                        is_unavailable = loc_info and loc_info.get('zone') == 'Unavailable'
-                                        
-                                        if not is_unattainable and not is_unavailable:
-                                            target_pet = option
-                                            break
-                                    
-                                    if target_pet:
-                                        pet_id = int(target_pet.get('id'))
-                                        pet_name = target_pet.get('name', 'Unknown')
-                                        
-                                        if pet_id not in missing_pets:
-                                            location = pet_locations.get(pet_id, {
-                                                "zone": "Unknown",
-                                                "source": "Check WarcraftPets",
-                                                "coords": "N/A"
-                                            })
-                                            
-                                            missing_pets[pet_id] = {
-                                                "id": pet_id,
-                                                "name": pet_name,
-                                                "zone": location["zone"],
-                                                "source": location["source"],
-                                                "coords": location["coords"],
-                                                "warcraftpets_url": get_warcraftpets_url(pet_id, pet_name),
-                                                "needed_for": []
-                                            }
-                                        
-                                        if encounter.get('encounter_name') not in missing_pets[pet_id]['needed_for']:
-                                            missing_pets[pet_id]['needed_for'].append(encounter.get('encounter_name', 'Unknown'))
-        
-        # Convert to list and sort by how many encounters need them
-        result = sorted(missing_pets.values(), key=lambda x: len(x['needed_for']), reverse=True)
-        return jsonify(result)
+        strategies = db_helper.get_all_strategies()
+        return jsonify(strategies)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1914,42 +1543,12 @@ def get_leveling_queue():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/analytics')
-def get_analytics():
-    """Get analytics data for charts"""
+@app.route('/api/combat/stats', methods=['GET'])
+def get_combat_stats():
+    """Get combat stats using SQL"""
     try:
-        analytics = {
-            "readyByExpansion": {},
-            "readyByCategory": {},
-            "totalEncounters": 0,
-            "readyEncounters": 0
-        }
-        
-        if os.path.exists('my_ready_strategies.json'):
-            with open('my_ready_strategies.json', 'r') as f:
-                data = json.load(f)
-                
-                for exp_name, expansions in data.items():
-                    exp_count = 0
-                    for cat_name, encounters in expansions.items():
-                        count = len(encounters)
-                        exp_count += count
-                        analytics["readyByCategory"][cat_name] = analytics["readyByCategory"].get(cat_name, 0) + count
-                    
-                    analytics["readyByExpansion"][exp_name] = exp_count
-                    analytics["readyEncounters"] += exp_count
-        
-        # Get total strategies count
-        if os.path.exists('strategies.json'):
-            with open('strategies.json', 'r') as f:
-                data = json.load(f)
-                total = 0
-                for exp in data.values():
-                    for cat in exp.values():
-                        total += len(cat)
-                analytics["totalEncounters"] = total
-        
-        return jsonify(analytics)
+        stats = db_helper.get_combat_stats(days=30)
+        return jsonify(stats)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2025,26 +1624,22 @@ def calendar():
 
 @app.route('/api/calendar')
 def get_calendar():
-    """Return dates for a given month (default to current month) with Squirt and Pet Battle Week flags"""
+    """Return upcoming dates starting from today with Squirt and Pet Battle Week flags"""
     try:
         import datetime, calendar, flask
-        # Get month param (format YYYY-MM) or default to current month
-        month_str = flask.request.args.get('month')
-        if month_str:
-            year, month = map(int, month_str.split('-'))
-        else:
-            now = datetime.date.today()
-            year, month = now.year, now.month
-        # First day of month
-        first_day = datetime.date(year, month, 1)
-        _, days_in_month = calendar.monthrange(year, month)
+        # Get number of days param or default to 14 days ahead
+        days_ahead = int(flask.request.args.get('days', 14))
+        
+        # Start from today
+        start_date = datetime.date.today()
+        
         # Base squirt date for schedule
         base_squirt = datetime.date(2025, 12, 3)
         # Pet Battle Week start
         pbw_start = datetime.date(2025, 12, 16)
         result = []
-        for day in range(days_in_month):
-            d = first_day + datetime.timedelta(days=day)
+        for day in range(days_ahead):
+            d = start_date + datetime.timedelta(days=day)
             days_since_base = (d - base_squirt).days
             is_squirt = (days_since_base % 15) == 0
             
@@ -2110,5 +1705,5 @@ def fetch_strategy():
 
 if __name__ == '__main__':
     update_stats()
-    print("🌐 Starting PetWeaver Desktop App on http://127.0.0.1:5001")
-    app.run(debug=False, port=5002)
+    print("🌐 Starting PetWeaver Desktop App on http://127.0.0.1:5003")
+    app.run(debug=False, port=5003)

@@ -108,6 +108,90 @@
         updateGlobalStatus();
     </script>
     {% block scripts %}{% endblock %}
+    <!-- Wild Pet Alert Overlay -->
+    <div id="wild-alert-overlay"
+        style="display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; width: 80%; max-width: 600px;">
+        <div class="alert alert-danger shadow-lg border-3 border-danger" role="alert">
+            <div class="d-flex align-items-center">
+                <i class="fas fa-exclamation-triangle fa-3x me-3 text-danger"></i>
+                <div>
+                    <h4 class="alert-heading fw-bold mb-1" id="wild-alert-title">WILD PET DETECTED!</h4>
+                    <p class="mb-0 fs-5" id="wild-alert-message">Capture this pet immediately!</p>
+                </div>
+                <button type="button" class="btn-close ms-auto"
+                    onclick="document.getElementById('wild-alert-overlay').style.display='none'"></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Sound Alert Context
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playAlertSound() {
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.type = 'square';
+            oscillator.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
+            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime + 0.1); // A5
+            oscillator.frequency.setValueAtTime(440, audioCtx.currentTime + 0.2); // A4
+
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.5);
+        }
+
+        // Wild Pet Alert Polling
+        function checkWildAlerts() {
+            fetch('/api/alerts/active')
+                .then(response => response.json())
+                .then(data => {
+                    const overlay = document.getElementById('wild-alert-overlay');
+                    const title = document.getElementById('wild-alert-title');
+                    const message = document.getElementById('wild-alert-message');
+
+                    if (data.alert) {
+                        // Only play sound for new critical alerts (simple check: if overlay was hidden)
+                        if (overlay.style.display === 'none' && data.level === 'CRITICAL') {
+                            playAlertSound();
+                        }
+
+                        overlay.style.display = 'block';
+                        message.innerText = data.message;
+
+                        if (data.level === 'CRITICAL') {
+                            title.innerText = '🚨 CRITICAL ALERT 🚨';
+                            overlay.querySelector('.alert').className = 'alert alert-danger shadow-lg border-3 border-danger';
+                        } else {
+                            title.innerText = 'Wild Pet Alert';
+                            overlay.querySelector('.alert').className = 'alert alert-info shadow-lg border-3 border-info';
+                        }
+
+                        // Auto-hide after 10 seconds if not critical
+                        if (data.level !== 'CRITICAL') {
+                            setTimeout(() => { overlay.style.display = 'none'; }, 10000);
+                        }
+                    } else {
+                        // Optional: Hide if no longer active, or let user close it manually
+                        // overlay.style.display = 'none'; 
+                    }
+                })
+                .catch(err => console.log('Alert poll failed', err));
+        }
+
+        // Poll every 2 seconds
+        setInterval(checkWildAlerts, 2000);
+    </script>
 </body>
 
 </html>

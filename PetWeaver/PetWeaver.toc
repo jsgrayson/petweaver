@@ -26,3 +26,5 @@ PetWeaverQueue.lua
 PetWeaverQueueUI.lua
 PetWeaverEnemyRecorder.lua
 PetWeaverScanner.lua
+PetWeaverWanted.lua
+PetWeaverWildAlert.lua
