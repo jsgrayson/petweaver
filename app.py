@@ -510,6 +510,26 @@ def dashboard():
     """Progress dashboard with charts and analytics"""
     return render_template('dashboard.html')
 
+@app.route('/api/dashboard/charts')
+def get_dashboard_charts():
+    """Get detailed chart data for dashboard"""
+    try:
+        health_stats = db_helper.get_collection_health_stats()
+        return jsonify({
+            "collection_health": health_stats
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/collection/missing')
+def get_missing_collection():
+    """Get missing pets summary"""
+    try:
+        missing = db_helper.get_missing_pets(limit=10)
+        return jsonify(missing)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/strategies')
 def strategies():
     """Browse all strategies (mobile-optimized)"""

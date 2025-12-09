@@ -1,405 +1,127 @@
 {% extends "base.html" %}
 
-{% block title %}PetWeaver - Command Center{% endblock %}
+{% block title %}PetWeaver - The Loom{% endblock %}
 
 {% block content %}
-<style>
-    /* Modern Theme Override */
-    body {
-        background: linear-gradient(135deg, #0f1419 0%, #1a1f2e 100%);
-        color: #e8eaed;
-    }
+<div class="container weaver-dashboard">
+    <div class="text-center mb-5">
+        <h1>PetWeaver</h1>
+        <p class="lead" style="font-family: 'Cinzel', serif; color: #b0bec5; font-size: 1.2rem;">Weave your destiny.
+            Conquer the battles.</p>
+    </div>
 
-    .hero-section {
-        text-align: center;
-        padding: 3rem 0;
-        margin-bottom: 3rem;
-    }
-
-    .hero-title {
-        font-size: 4rem;
-        font-weight: 800;
-        background: linear-gradient(135deg, #00d4ff 0%, #b75cff 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 1rem;
-        animation: glow 3s ease-in-out infinite;
-    }
-
-    @keyframes glow {
-
-        0%,
-        100% {
-            filter: drop-shadow(0 0 20px rgba(0, 212, 255, 0.5));
-        }
-
-        50% {
-            filter: drop-shadow(0 0 40px rgba(183, 92, 255, 0.7));
-        }
-    }
-
-    .hero-subtitle {
-        font-size: 1.3rem;
-        color: #8b92a0;
-        margin-bottom: 2rem;
-    }
-
-    .glass-card {
-        background: rgba(255, 255, 255, 0.03);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 20px;
-        padding: 2rem;
-        transition: all 0.3s ease;
-        height: 100%;
-    }
-
-    .glass-card:hover {
-        border-color: rgba(0, 212, 255, 0.3);
-        box-shadow: 0 8px 32px rgba(0, 212, 255, 0.15);
-        transform: translateY(-4px);
-    }
-
-    .stat-card {
-        background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, rgba(183, 92, 255, 0.1) 100%);
-        border: 1px solid rgba(0, 212, 255, 0.2);
-        border-radius: 16px;
-        padding: 2rem;
-        text-align: center;
-    }
-
-    .stat-value {
-        font-size: 3.5rem;
-        font-weight: 700;
-        background: linear-gradient(135deg, #00d4ff 0%, #b75cff 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 1rem 0;
-    }
-
-    .stat-label {
-        color: #8b92a0;
-        font-size: 0.9rem;
-        letter-spacing: 1px;
-    }
-
-    .action-btn {
-        background: linear-gradient(135deg, #00d4ff 0%, #b75cff 100%);
-        border: none;
-        color: white;
-        padding: 1rem 2rem;
-        border-radius: 12px;
-        font-weight: 700;
-        font-size: 1.1rem;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(0, 212, 255, 0.3);
-    }
-
-    .action-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 25px rgba(0, 212, 255, 0.5);
-    }
-
-    .action-btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-
-    .console-box {
-        background: #000;
-        border: 1px solid rgba(0, 212, 255, 0.2);
-        border-radius: 12px;
-        padding: 1.5rem;
-        font-family: 'Courier New', monospace;
-        font-size: 0.9rem;
-        color: #00ff00;
-        height: 300px;
-        overflow-y: auto;
-    }
-
-    .console-box::-webkit-scrollbar {
-        width: 8px;
-    }
-
-    .console-box::-webkit-scrollbar-thumb {
-        background: rgba(0, 212, 255, 0.3);
-        border-radius: 4px;
-    }
-
-    .toggle-switch {
-        position: relative;
-        display: inline-block;
-        width: 60px;
-        height: 30px;
-    }
-
-    .toggle-switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-    }
-
-    .slider {
-        position: absolute;
-        cursor: pointer;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: rgba(255, 255, 255, 0.1);
-        transition: .4s;
-        border-radius: 30px;
-    }
-
-    .slider:before {
-        position: absolute;
-        content: "";
-        height: 22px;
-        width: 22px;
-        left: 4px;
-        bottom: 4px;
-        background-color: white;
-        transition: .4s;
-        border-radius: 50%;
-    }
-
-    input:checked+.slider {
-        background: linear-gradient(135deg, #00d4ff 0%, #b75cff 100%);
-    }
-
-    input:checked+.slider:before {
-        transform: translateX(30px);
-    }
-
-    .section-title {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #e8eaed;
-        margin-bottom: 1.5rem;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .event-item {
-        background: rgba(255, 255, 255, 0.02);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 8px;
-        padding: 1rem;
-        margin-bottom: 0.5rem;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .badge-custom {
-        padding: 0.4rem 0.8rem;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-
-    .badge-squirt {
-        background: linear-gradient(135deg, #00d4ff 0%, #0080ff 100%);
-    }
-
-    .badge-bonus {
-        background: linear-gradient(135deg, #ffbe0b 0%, #fb5607 100%);
-    }
-</style>
-
-<!-- Hero Section -->
-<div class="hero-section">
-    <h1 class="hero-title">🐾 PetWeaver</h1>
-    <p class="hero-subtitle">Automated Pet Battle Strategy & Collection Management</p>
-</div>
-
-<!-- Stats Grid -->
-<div class="row mb-4">
-    <div class="col-md-4 mb-3">
-        <div class="stat-card glass-card">
-            <div class="stat-label">MY PETS</div>
-            <div class="stat-value" id="stat-pets">0</div>
-            <div class="stat-label">Collection Size</div>
+    <!-- Stats / Status Row -->
+    <div class="row mb-4 text-center">
+        <div class="col-md-4">
+            <h3 id="stat-pets">0</h3>
+            <small>Pets Collected</small>
+        </div>
+        <div class="col-md-4">
+            <h3 id="stat-strategies">0</h3>
+            <small>Strategies Known</small>
+        </div>
+        <div class="col-md-4">
+            <h3 id="stat-ready" style="color: var(--magic-blue)">0</h3>
+            <small>Ready to Battle</small>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
-        <div class="stat-card glass-card">
-            <div class="stat-label">STRATEGIES</div>
-            <div class="stat-value" id="stat-strategies">0</div>
-            <div class="stat-label">Known Battles</div>
-        </div>
-    </div>
-    <div class="col-md-4 mb-3">
-        <div class="stat-card glass-card">
-            <div class="stat-label">READY</div>
-            <div class="stat-value" id="stat-ready"
-                style="background: linear-gradient(135deg, #00ff88 0%, #00aa88 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                0</div>
-            <div class="stat-label">Teams Available</div>
-        </div>
-    </div>
-</div>
 
-<!-- Main Grid -->
-<div class="row">
-    <!-- Automation Controls -->
-    <div class="col-md-8 mb-4">
-        <div class="glass-card">
-            <h2 class="section-title">
-                <i class="fas fa-cogs"></i> Automation Controls
-            </h2>
-
-            <div class="row mb-4">
-                <div class="col-md-6 mb-3">
-                    <label class="d-flex align-items-center justify-content-between mb-2">
-                        <span>Skip Blizzard Fetch</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="skip-fetch" checked>
-                            <span class="slider"></span>
-                        </label>
-                    </label>
+    <!-- Active Team Layout (The Loom) -->
+    <div class="row justify-content-center">
+        <!-- Pet Slot 1 -->
+        <div class="col-md-4 mb-4">
+            <div class="pet-card">
+                <div class="pet-portrait">
+                    <!-- Placeholder or Dynamic Image -->
+                    <img src="https://wow.zamimg.com/images/wow/icons/large/inv_misc_head_dragon_01.jpg" alt="Pet Name"
+                        class="img-fluid" style="width:100%; height:100%; object-fit: cover;">
                 </div>
-                <div class="col-md-6 mb-3">
-                    <label class="d-flex align-items-center justify-content-between mb-2">
-                        <span>Force Re-Scrape</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="force-scrape">
-                            <span class="slider"></span>
-                        </label>
-                    </label>
+                <h3>Active Slot 1</h3>
+                <div class="stats-gems mt-auto mb-2">
+                    <span class="badge bg-success">HP</span>
+                    <span class="badge bg-primary">PWR</span>
+                    <span class="badge bg-danger">SPD</span>
                 </div>
             </div>
+        </div>
 
-            <div class="mb-4">
-                <label class="mb-2" style="color: #8b92a0;">Addon Path</label>
-                <input type="text" id="addon-path" class="form-control"
-                    style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #e8eaed; border-radius: 8px; padding: 0.8rem;"
-                    value="{{ default_path }}" placeholder="/path/to/AddOns/PetWeaver">
+        <!-- Pet Slot 2 -->
+        <div class="col-md-4 mb-4">
+            <div class="pet-card">
+                <div class="pet-portrait">
+                    <img src="https://wow.zamimg.com/images/wow/icons/large/inv_misc_head_dragon_01.jpg" alt="Pet Name"
+                        class="img-fluid" style="width:100%; height:100%; object-fit: cover;">
+                </div>
+                <h3>Active Slot 2</h3>
+                <div class="stats-gems mt-auto mb-2">
+                    <span class="badge bg-success">HP</span>
+                    <span class="badge bg-primary">PWR</span>
+                    <span class="badge bg-danger">SPD</span>
+                </div>
             </div>
+        </div>
 
-            <button id="btn-run" class="action-btn w-100" onclick="runAutomation()">
-                <i class="fas fa-play me-2"></i>SYNC STRATEGIES
-            </button>
+        <!-- Pet Slot 3 -->
+        <div class="col-md-4 mb-4">
+            <div class="pet-card">
+                <div class="pet-portrait">
+                    <img src="https://wow.zamimg.com/images/wow/icons/large/inv_misc_head_dragon_01.jpg" alt="Pet Name"
+                        class="img-fluid" style="width:100%; height:100%; object-fit: cover;">
+                </div>
+                <h3>Active Slot 3</h3>
+                <div class="stats-gems mt-auto mb-2">
+                    <span class="badge bg-success">HP</span>
+                    <span class="badge bg-primary">PWR</span>
+                    <span class="badge bg-danger">SPD</span>
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- Upcoming Events -->
-    <div class="col-md-4 mb-4">
-        <div class="glass-card">
-            <h2 class="section-title" style="font-size: 1.3rem;">
-                <i class="fas fa-calendar-alt"></i> Upcoming Events
-            </h2>
-            <div id="upcoming-events">
-                <div class="text-muted text-center">Loading...</div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Console Output -->
-<div class="row">
-    <div class="col-md-12">
-        <div class="glass-card">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h2 class="section-title mb-0">
-                    <i class="fas fa-terminal"></i> Activity Log
-                </h2>
-                <small class="text-muted" id="last-update">Last Update: Never</small>
-            </div>
-            <div class="console-box" id="console-log">
-                <div>> Waiting for command...</div>
-            </div>
-        </div>
+    <div class="text-center mt-5 mb-4">
+        <button class="btn-weave" onclick="runAutomation()">
+            Weave Team
+        </button>
+        <div id="status-msg" class="mt-3 text-muted">Ready to weave...</div>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    let isRunning = false;
-
     function updateStatus() {
         fetch('/api/status')
-            .then(response => response.json())
+            .then(r => r.json())
             .then(data => {
                 document.getElementById('stat-pets').innerText = data.stats.pets;
                 document.getElementById('stat-strategies').innerText = data.stats.strategies;
                 document.getElementById('stat-ready').innerText = data.stats.ready;
-                document.getElementById('last-update').innerText = data.last_update || 'Never';
 
-                const logDiv = document.getElementById('console-log');
-                logDiv.innerHTML = data.log.map(line => `<div>> ${line}</div>`).join('');
+                const btn = document.querySelector('.btn-weave');
+                const msg = document.getElementById('status-msg');
 
                 if (data.status === 'RUNNING') {
-                    logDiv.scrollTop = logDiv.scrollHeight;
-                    const btn = document.getElementById('btn-run');
-                    btn.disabled = true;
-                    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>RUNNING...';
-                    isRunning = true;
+                    btn.style.opacity = '0.5';
+                    btn.innerText = 'WEAVING...';
+                    msg.innerText = 'The Loom is active...';
                 } else {
-                    if (isRunning) {
-                        const btn = document.getElementById('btn-run');
-                        btn.disabled = false;
-                        btn.innerHTML = '<i class="fas fa-play me-2"></i>SYNC STRATEGIES';
-                        isRunning = false;
-                    }
+                    btn.style.opacity = '1';
+                    btn.innerText = 'WEAVE TEAM';
+                    msg.innerText = 'Ready to weave.';
                 }
             });
     }
 
     function runAutomation() {
-        const skipFetch = document.getElementById('skip-fetch').checked;
-        const forceScrape = document.getElementById('force-scrape').checked;
-        const addonPath = document.getElementById('addon-path').value;
-
         fetch('/api/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                skip_fetch: skipFetch,
-                force_scrape: forceScrape,
-                addon_path: addonPath
-            })
-        })
-            .then(res => res.json())
-            .then(data => {
-                if (data.error) alert(data.error);
-                updateStatus();
-            });
+            body: JSON.stringify({ skip_fetch: true })
+        });
+        document.getElementById('status-msg').innerText = 'Initializing weave...';
     }
 
-    function loadUpcomingEvents() {
-        fetch('/api/calendar')
-            .then(r => r.json())
-            .then(data => {
-                const container = document.getElementById('upcoming-events');
-                if (!container) return;
-                if (data.length === 0) {
-                    container.innerHTML = '<div class="text-muted text-center">No upcoming events</div>';
-                    return;
-                }
-                container.innerHTML = data.map(item => {
-                    const squirt = item.is_squirt ? '<span class="badge-custom badge-squirt ms-2">Squirt</span>' : '';
-                    const pbw = item.is_pet_battle_week ? '<span class="badge-custom badge-bonus ms-2">Bonus Event</span>' : '';
-                    return `
-                        <div class="event-item">
-                            <span>${item.date} (${item.weekday})</span>
-                            <div>${squirt}${pbw}</div>
-                        </div>`;
-                }).join('');
-            })
-            .catch(err => {
-                console.error('Failed to load calendar', err);
-            });
-    }
-
-    setInterval(() => {
-        updateStatus();
-        loadUpcomingEvents();
-    }, 1000);
+    setInterval(updateStatus, 1000);
     updateStatus();
-    loadUpcomingEvents();
 </script>
 {% endblock %}
