@@ -1,25 +1,26 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Layout } from '../components/layout/Layout';
 import { apiListPets, PetSummary } from '../api/client';
 import './codex.css';
-
-const FALLBACK_IMAGE = '/assets/pets/magic.png';
+import { getPetPortraitPath, resolvePetFamily } from '../utils/petAssets';
 
 // Robust image component with fallback
 function PetCodexCard({ pet }: { pet: PetSummary }) {
   const [imgError, setImgError] = useState(false);
 
-  // Build portrait URL from family if not provided
-  const familySlug = pet.family.toLowerCase();
-  const portraitSrc = !imgError && pet.portraitUrl
-    ? pet.portraitUrl
-    : !imgError
-      ? `/assets/pets/${familySlug}.png`
-      : FALLBACK_IMAGE;
+  const familyKey = resolvePetFamily(pet.family);
+  const portraitSrc =
+    !imgError && pet.portraitUrl
+      ? pet.portraitUrl
+      : !imgError
+        ? getPetPortraitPath(familyKey)
+        : '/assets/pets/magic.png';
 
   return (
     <article className="codex-card">
-      <div className={`codex-card-portrait rarity-${pet.rarity.toLowerCase()}`}>
+      <div
+        className={`codex-card-portrait rarity-${pet.rarity.toLowerCase()}`}
+      >
         <img
           src={portraitSrc}
           alt={pet.name}
@@ -46,6 +47,8 @@ export const PetsPage: React.FC = () => {
   const [pets, setPets] = useState<PetSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const totalPets = loading ? '...' : pets.length;
 
   useEffect(() => {
     apiListPets()
@@ -59,6 +62,20 @@ export const PetsPage: React.FC = () => {
       });
   }, []);
 
+  // Simple client-side filtering by name or family
+  const filteredPets = useMemo(() => {
+    if (!query.trim()) return pets;
+    const q = query.toLowerCase();
+    return pets.filter((pet) => {
+      return (
+        pet.name.toLowerCase().includes(q) ||
+        pet.family.toLowerCase().includes(q)
+      );
+    });
+  }, [pets, query]);
+
+  const showingCount = loading ? '...' : filteredPets.length;
+
   return (
     <Layout background="/assets/backgrounds/codex.png">
       <div className="codex-page">
@@ -66,28 +83,59 @@ export const PetsPage: React.FC = () => {
           <div className="codex-vignette" />
           <div className="codex-inner">
             <header className="codex-header">
-              <div>
+              <div className="codex-heading">
+                <p className="codex-kicker">Midnight mode • Arcane Bestiary</p>
                 <h1 className="codex-title">Pet Codex</h1>
                 <p className="codex-subtitle">
                   Browse all discovered companions and their battle potential.
                 </p>
+                <div className="codex-pills">
+                  <span className="codex-pill">
+                    <span className="codex-pill-label">Total</span>
+                    <span className="codex-pill-value">{totalPets}</span>
+                  </span>
+                  <span className="codex-pill codex-pill-ghost">
+                    <span className="codex-pill-label">Skin</span>
+                    <span className="codex-pill-value">Midnight</span>
+                  </span>
+                  <span className="codex-pill codex-pill-ghost">
+                    <span className="codex-pill-label">Showing</span>
+                    <span className="codex-pill-value">{showingCount}</span>
+                  </span>
+                </div>
               </div>
-              <input
-                type="search"
-                className="codex-search"
-                placeholder="Search by name or family…"
-              />
+              <div className="codex-actions">
+                <div className="codex-search-shell">
+                  <input
+                    type="search"
+                    className="codex-search"
+                    placeholder="Search by name or family..."
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  <div className="codex-search-glow" />
+                </div>
+                <div className="codex-actions-note">Arcane archive</div>
+              </div>
             </header>
 
             {loading && (
-              <p style={{ color: '#94a3b8', textAlign: 'center' }}>Loading pets...</p>
+              <div className="codex-state codex-state-soft">
+                Loading pets...
+              </div>
             )}
             {error && (
-              <p style={{ color: '#f87171', textAlign: 'center' }}>{error}</p>
+              <div className="codex-state codex-state-error">{error}</div>
+            )}
+
+            {!loading && !error && filteredPets.length === 0 && (
+              <div className="codex-state codex-state-soft">
+                No pets match that query.
+              </div>
             )}
 
             <section className="codex-grid">
-              {pets.map((pet) => (
+              {filteredPets.map((pet) => (
                 <PetCodexCard key={pet.id} pet={pet} />
               ))}
             </section>

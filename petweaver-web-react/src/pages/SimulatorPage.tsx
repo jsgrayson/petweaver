@@ -1,136 +1,68 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Layout } from '../components/layout/Layout';
-import { apiListPets, apiRunSimulation, PetSummary, SimulationResult } from '../api/client';
-import './simulator.css';
+import { Page } from '../theme/components/Page';
+import { Panel } from '../theme/components/Panel';
+import '../styles/simulator.css';
 
 export const SimulatorPage: React.FC = () => {
-  const [pets, setPets] = useState<PetSummary[]>([]);
-  const [yourTeam, setYourTeam] = useState<string[]>([]);
-  const [enemyTeam, setEnemyTeam] = useState<string[]>([]);
-  const [result, setResult] = useState<SimulationResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    apiListPets().then(setPets).catch(console.error);
-  }, []);
-
-  const togglePet = (id: string, team: 'your' | 'enemy') => {
-    if (team === 'your') {
-      setYourTeam(prev =>
-        prev.includes(id) ? prev.filter(p => p !== id) : prev.length < 3 ? [...prev, id] : prev
-      );
-    } else {
-      setEnemyTeam(prev =>
-        prev.includes(id) ? prev.filter(p => p !== id) : prev.length < 3 ? [...prev, id] : prev
-      );
-    }
-  };
-
-  const runSimulation = async () => {
-    if (yourTeam.length === 0 || enemyTeam.length === 0) {
-      setError('Select at least one pet for each team');
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await apiRunSimulation({
-        player_pets: yourTeam,
-        enemy_pets: enemyTeam
-      });
-      setResult(res);
-    } catch (err: any) {
-      setError(err.message || 'Simulation failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getPetName = (id: string) => pets.find(p => String(p.id) === id)?.name || id;
-
   return (
-    <Layout background="/assets/backgrounds/simulator.png">
-      <div className="page-panel simulator-container">
-
-        <header className="sim-header">
-          <h1 className="sim-title">Pet Battle Simulator</h1>
-          <p className="sim-subtitle">
-            Configure teams, abilities, and run predictive battles.
-          </p>
-        </header>
-
-        <div className="sim-panels">
-
-          {/* LEFT SIDE – CONFIG */}
-          <div className="sim-left">
-            <section className="sim-section">
-              <h2 className="sim-section-title">Your Team ({yourTeam.length}/3)</h2>
-              <div className="sim-pet-grid">
-                {pets.map(pet => (
-                  <button
-                    key={pet.id}
-                    className={`sim-pet-btn ${yourTeam.includes(String(pet.id)) ? 'selected' : ''}`}
-                    onClick={() => togglePet(String(pet.id), 'your')}
-                  >
-                    {pet.name}
-                  </button>
-                ))}
+    <Layout>
+      <Page backgroundKey="simulator">
+        <div className="simulator-page">
+          <Panel className="simulator-panel">
+            <header className="page-header">
+              <div className="page-header-main">
+                <p className="page-kicker">Midnight mode • Battle Sandbox</p>
+                <h1 className="page-title">Simulator</h1>
+                <p className="page-subtitle">
+                  Model encounters, test pet teams, and iterate on comps before you step into the real fight.
+                </p>
               </div>
-            </section>
-
-            <section className="sim-section">
-              <h2 className="sim-section-title">Enemy Team ({enemyTeam.length}/3)</h2>
-              <div className="sim-pet-grid">
-                {pets.map(pet => (
-                  <button
-                    key={pet.id}
-                    className={`sim-pet-btn ${enemyTeam.includes(String(pet.id)) ? 'selected enemy' : ''}`}
-                    onClick={() => togglePet(String(pet.id), 'enemy')}
-                  >
-                    {pet.name}
-                  </button>
-                ))}
+              <div className="page-header-actions">
+                <button className="btn-primary" type="button">
+                  New Simulation
+                </button>
+                <button className="btn-ghost" type="button">
+                  Clear Results
+                </button>
               </div>
-            </section>
+            </header>
 
-            <button className="sim-run-btn" onClick={runSimulation} disabled={loading}>
-              {loading ? 'Running...' : 'Run Simulation'}
-            </button>
-            {error && <p className="sim-error">{error}</p>}
-          </div>
+            <div className="simulator-layout">
+              <section className="simulator-col simulator-config card-midnight">
+                <h2 className="card-title">Setup</h2>
+                <p className="card-subtitle">
+                  Choose pets, abilities, and enemy scripts to simulate.
+                </p>
+                <div className="simulator-placeholder">
+                  Simulation controls go here.
+                </div>
+              </section>
 
-          {/* RIGHT SIDE – RESULTS */}
-          <div className="sim-right">
-            <section className="sim-results-section">
-              <h2 className="sim-section-title">Results</h2>
-              <div className="sim-results-box">
-                {result ? (
-                  <div>
-                    <p className="sim-winner">Winner: <strong>{result.winner}</strong></p>
-                    <p>Turns: {result.turns}</p>
-                    <p>{result.message}</p>
+              <section className="simulator-col simulator-results">
+                <article className="card-midnight simulator-results-card">
+                  <h2 className="card-title">Results</h2>
+                  <p className="card-subtitle">
+                    Charts, logs, and outcome distributions appear here once you run a simulation.
+                  </p>
+                  <div className="simulator-placeholder">
+                    Results / graph area.
                   </div>
-                ) : (
-                  <p>Simulation results will appear here.</p>
-                )}
-              </div>
-            </section>
+                </article>
 
-            <section className="sim-logs-section">
-              <h2 className="sim-section-title">Battle Log</h2>
-              <div className="sim-log-window">
-                {result?.log && result.log.length > 0 ? (
-                  <pre>{result.log.join('\n')}</pre>
-                ) : (
-                  <p>No simulation run yet.</p>
-                )}
-              </div>
-            </section>
-          </div>
-
+                <article className="card-midnight simulator-log-card">
+                  <h2 className="card-title">Combat Log</h2>
+                  <div className="simulator-log">
+                    <div className="simulator-log-empty">
+                      No simulations yet. Run one to see the combat log.
+                    </div>
+                  </div>
+                </article>
+              </section>
+            </div>
+          </Panel>
         </div>
-      </div>
+      </Page>
     </Layout>
   );
 };

@@ -1,34 +1,58 @@
 import React from 'react';
 import { Layout } from '../components/layout/Layout';
-import './settings.css';
+import { Page } from '../theme/components/Page';
+import { Panel } from '../theme/components/Panel';
+import '../styles/tools.css';
 
 export const SettingsPage: React.FC = () => {
   return (
-    <Layout background="/assets/backgrounds/settings.png">
-      <div className="page-panel settings-panel">
-        <header className="settings-header">
-          <h1 className="settings-title">Settings</h1>
-          <p className="settings-subtitle">
-            Configure PetWeaver behavior and connections.
-          </p>
-        </header>
+    <Layout>
+      <Page backgroundKey="settings">
+        <div className="tools-page settings-page">
+          <Panel className="tools-panel">
+            <header className="page-header">
+              <div className="page-header-main">
+                <p className="page-kicker">Midnight mode • Control Panel</p>
+                <h1 className="page-title">Settings</h1>
+                <p className="page-subtitle">
+                  Configure Petweaver behavior, skins, and integration settings.
+                </p>
+              </div>
+            </header>
 
-        <div className="settings-grid">
-          <section className="settings-section">
-            <h2>General</h2>
-            <p className="text-slate-400 text-sm">Use PetWeaver Automation: <span className="text-green-400">Enabled</span></p>
-          </section>
-          <section className="settings-section">
-            <h2>API / Server</h2>
-            <p className="text-slate-400 text-sm">Backend: <span className="text-slate-200">http://127.0.0.1:5003</span></p>
-            <p className="text-slate-400 text-sm">Status: <span className="text-green-400">Connected</span></p>
-          </section>
-          <section className="settings-section">
-            <h2>UI & Theme</h2>
-            <p className="text-slate-400 text-sm">Theme: <span className="text-slate-200">Arcane Glass</span></p>
-          </section>
+            <div className="tools-layout">
+              <section className="tools-col card-midnight">
+                <h2 className="card-title">General</h2>
+                <div className="tools-card-body">
+                  <div className="tools-placeholder">
+                    Basic options (server URL, theme toggle, etc.).
+                  </div>
+                </div>
+              </section>
+
+              <section className="tools-col">
+                <article className="card-midnight">
+                  <h2 className="card-title">Integrations</h2>
+                  <div className="tools-card-body">
+                    <div className="tools-placeholder">
+                      API keys, endpoints, and other hooks.
+                    </div>
+                  </div>
+                </article>
+
+                <article className="card-midnight">
+                  <h2 className="card-title">Danger Zone</h2>
+                  <div className="tools-card-body">
+                    <div className="tools-placeholder">
+                      Reset, clear caches, rebuild indices.
+                    </div>
+                  </div>
+                </article>
+              </section>
+            </div>
+          </Panel>
         </div>
-      </div>
+      </Page>
     </Layout>
   );
 };
