@@ -1,0 +1,51 @@
+.genetic-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.gen-header {
+    margin-bottom: 4px;
+}
+
+.gen-title {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #fef3c7;
+}
+
+.gen-subtitle {
+    margin-top: 4px;
+    color: #e5e7eb;
+    font-size: 0.9rem;
+}
+
+.gen-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+@media (min-width: 900px) {
+    .gen-layout {
+        flex-direction: row;
+    }
+}
+
+.gen-section {
+    flex: 1;
+    background: rgba(15, 23, 42, 0.85);
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    padding: 16px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7);
+}
+
+.gen-section h2 {
+    margin: 0 0 12px;
+    font-size: 1.2rem;
+    color: #e2e8f0;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 4px;
+}

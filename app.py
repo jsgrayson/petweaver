@@ -480,9 +480,11 @@ def get_status():
     """Get status with real-time SQL stats"""
     try:
         stats = db_helper.get_collection_stats()
+        combat_today = db_helper.get_combat_stats(days=1)
         return jsonify({
             **state,
-            "stats": stats
+            "db_stats": stats,
+            "combat_stats": combat_today
         })
     except Exception as e:
         return jsonify({**state, "stats_error": str(e)})

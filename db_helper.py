@@ -40,10 +40,10 @@ def get_all_pets(limit: int = 1000, offset: int = 0) -> List[Dict]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT pet_id, species_id, name, level, quality, breed_id, 
-                   health, power, speed, is_favorite, custom_name
-            FROM pets
-            ORDER BY level DESC, quality DESC
+            SELECT p.*, s.pet_type as family_id, s.icon
+            FROM pets p
+            LEFT JOIN species s ON p.species_id = s.species_id
+            ORDER BY p.level DESC, p.quality DESC
             LIMIT ? OFFSET ?
         ''', (limit, offset))
         return [dict(row) for row in cursor.fetchall()]

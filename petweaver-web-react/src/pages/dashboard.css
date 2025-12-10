@@ -1,0 +1,72 @@
+.dashboard-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.dash-header {
+    margin-bottom: 8px;
+}
+
+.dash-title {
+    margin: 0;
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: #fef3c7;
+}
+
+.dash-subtitle {
+    margin-top: 4px;
+    color: #e5e7eb;
+    font-size: 0.9rem;
+}
+
+.dash-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.dash-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+}
+
+@media (min-width: 768px) {
+    .dash-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+.dash-card {
+    background: rgba(15, 23, 42, 0.85);
+    border-radius: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    padding: 16px 18px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7);
+}
+
+.dash-card h2 {
+    margin: 0 0 6px;
+    font-size: 1rem;
+    color: #f9fafb;
+}
+
+.dash-metric {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #fef3c7;
+    margin: 0 0 4px;
+}
+
+.dash-label {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #e5e7eb;
+}
+
+.dash-ok {
+    color: #4ade80;
+}

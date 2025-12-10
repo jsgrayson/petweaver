@@ -1,0 +1,252 @@
+/* ===== Codex Page Structure ===== */
+
+/* Top-level wrapper for the Codex page */
+.codex-page {
+    position: relative;
+    min-height: calc(100vh - 64px);
+    /* adjust if nav is different height */
+    overflow: visible;
+}
+
+/* Codex-specific background layer */
+.codex-page::before {
+    content: "";
+    position: fixed;
+    /* covers the whole viewport */
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    /* behind everything including menu */
+    background-image: url("/assets/backgrounds/codex.png");
+    background-size: cover;
+    background-position: center top;
+    background-repeat: no-repeat;
+}
+
+/* Ensure the panel + content sit above the background */
+.codex-page .page-panel {
+    position: relative;
+    z-index: 1;
+    background: radial-gradient(circle at top center,
+            rgba(5, 5, 10, 0.96),
+            rgba(5, 5, 10, 0.90) 40%,
+            rgba(5, 5, 10, 0.88) 100%);
+    overflow: visible;
+    padding-top: 24px;
+    padding-bottom: 32px;
+    max-width: 1100px;
+    margin: 40px auto;
+}
+
+/* Content wrapper above vignette */
+.codex-inner {
+    position: relative;
+    z-index: 2;
+}
+
+/* ===== Soft ambient vignette behind Codex cards (no dots, no patterns) ===== */
+.codex-vignette {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    /* behind everything */
+    background:
+        radial-gradient(circle at 5% 100%, rgba(243, 156, 55, 0.22), transparent 60%),
+        radial-gradient(circle at 95% 95%, rgba(111, 207, 255, 0.20), transparent 60%),
+        radial-gradient(circle at 50% 10%, rgba(243, 156, 55, 0.15), transparent 65%);
+    mix-blend-mode: screen;
+    opacity: 0.75;
+    border-radius: inherit;
+}
+
+/* ===== Panel Layout ===== */
+.codex-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* ===== Header ===== */
+.codex-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    gap: 16px;
+}
+
+@media (max-width: 640px) {
+    .codex-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+
+.codex-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #fef3c7;
+    margin: 0;
+}
+
+.codex-subtitle {
+    margin: 4px 0 0;
+    font-size: 0.9rem;
+    color: #e5e7eb;
+}
+
+.codex-search {
+    width: 100%;
+    max-width: 260px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.8);
+    background: rgba(15, 23, 42, 0.95);
+    color: #f9fafb;
+}
+
+/* ===== DENSER GRID: wraps sooner and stays compact ===== */
+.codex-grid {
+    display: grid;
+    gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    justify-content: center;
+    width: 100%;
+    overflow: visible;
+}
+
+/* On very large screens, keep the grid compact */
+@media (min-width: 1440px) {
+    .codex-grid {
+        max-width: 900px;
+        margin-inline: auto;
+    }
+}
+
+/* ===== Card (chunkier) ===== */
+.codex-card {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+    min-height: 170px;
+    padding: 16px 20px;
+    background: radial-gradient(circle at top, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.8));
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7);
+    position: relative;
+    z-index: 3;
+    /* above vignette & inner backdrop */
+    overflow: visible;
+    /* don't clip portrait glows */
+}
+
+/* Portrait container with rarity glow */
+.codex-card-portrait {
+    position: relative;
+    flex-shrink: 0;
+    width: 96px;
+    height: 96px;
+    border-radius: 12px;
+    overflow: visible;
+    /* important for glow */
+    background: radial-gradient(circle, #1f2937, #020617);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 4;
+    /* above card body */
+}
+
+/* Inner darkening for depth */
+.codex-card-portrait::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: inset 0 0 18px rgba(0, 0, 0, 0.45);
+}
+
+/* ===== Rarity Glow on Portrait ===== */
+/* COMMON */
+.rarity-common {
+    box-shadow: 0 0 10px 2px rgba(180, 180, 180, 0.28);
+}
+
+/* UNCOMMON (green) */
+.rarity-uncommon {
+    box-shadow: 0 0 12px 3px rgba(80, 255, 90, 0.40);
+}
+
+/* RARE (blue) */
+.rarity-rare {
+    box-shadow: 0 0 14px 4px rgba(60, 140, 255, 0.55);
+}
+
+/* EPIC (purple) */
+.rarity-epic {
+    box-shadow: 0 0 16px 5px rgba(200, 90, 255, 0.65);
+}
+
+.codex-card-portrait img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.codex-card-body {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+}
+
+.codex-card-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #f9fafb;
+    margin: 0 0 4px;
+}
+
+.codex-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: #e5e7eb;
+}
+
+.codex-card-family {
+    color: #94a3b8;
+}
+
+.codex-card-rarity {
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.6);
+}
+
+/* ===== Rarity Colours ===== */
+.codex-rarity-common {
+    border-color: #9ca3af;
+    color: #e5e7eb;
+}
+
+.codex-rarity-uncommon {
+    border-color: #22c55e;
+    color: #bbf7d0;
+}
+
+.codex-rarity-rare {
+    border-color: #38bdf8;
+    color: #bae6fd;
+}
+
+.codex-rarity-epic {
+    border-color: #a855f7;
+    color: #e9d5ff;
+}
