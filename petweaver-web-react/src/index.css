@@ -30,3 +30,8 @@ body {
   position: relative;
   z-index: 1;
 }
+
+.app-sidebar {
+  z-index: 3000 !important;
+  position: relative !important;
+}
