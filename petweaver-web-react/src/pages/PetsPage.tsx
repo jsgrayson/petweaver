@@ -9,12 +9,10 @@ function PetCodexCard({ pet }: { pet: PetSummary }) {
   const [imgError, setImgError] = useState(false);
 
   const familyKey = resolvePetFamily(pet.family);
-  const portraitSrc =
-    !imgError && pet.portraitUrl
-      ? pet.portraitUrl
-      : !imgError
-        ? getPetPortraitPath(familyKey)
-        : '/assets/pets/magic.png';
+  // Always prefer local assets; ignore remote portraitUrl to avoid 404s
+  const portraitSrc = !imgError
+    ? getPetPortraitPath(familyKey)
+    : '/assets/pets/magic.png';
 
   return (
     <article className="codex-card">
@@ -135,8 +133,8 @@ export const PetsPage: React.FC = () => {
             )}
 
             <section className="codex-grid">
-              {filteredPets.map((pet) => (
-                <PetCodexCard key={pet.id} pet={pet} />
+              {filteredPets.map((pet, index) => (
+                <PetCodexCard key={`${pet.id}-${index}`} pet={pet} />
               ))}
             </section>
           </div>
